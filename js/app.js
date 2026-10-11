@@ -87,13 +87,14 @@ function taskDetail() {
   const activities = state.data.activity.filter((a) => a.taskId === task.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
   const handoffs = state.data.handoffs.filter((h) => h.taskId === task.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
   const showingActivity = state.taskHistoryTab !== 'handoffs';
+  const latestProgress = activities.find((a) => a.type === 'update' && a.progress?.trim());
   return shell(`<section class="page task-detail-page">
     <button class="back-link" data-nav="tasks">← 返回任务列表</button>
     <header class="task-detail-head"><div><div class="task-title-line"><h3>${esc(task.title)}</h3>${badge(task.status)}</div><div class="task-meta"><span><b>负责人</b>${esc(task.ownerName || '未分配')}</span><span><b>最近更新</b>${dateText(task.updatedAt || task.createdAt)}</span></div></div><button class="btn danger small" data-delete-task="${task.id}">删除任务</button></header>
     <div class="task-description"><span>任务说明</span><div class="prose">${esc(task.requirement || '暂无任务说明')}</div></div>
     <div class="task-actions" aria-label="任务操作"><button class="btn primary" data-open="update-task">更新进度</button><button class="btn dark" data-open="handoff">交接任务</button></div>
     <section class="task-focus" aria-label="任务当前情况">
-      <div class="task-summary"><h4>当前进度</h4><div class="prose">${esc(task.remark || '暂无备注')}</div>${task.status === 'Blocked' && task.blockedReason ? `<div class="warning"><b>阻塞说明：</b><span class="prose">${esc(task.blockedReason)}</span></div>`:''}</div>
+      <div class="task-summary"><h4>最新进展</h4><div class="prose">${esc(latestProgress?.progress || '暂无进展记录')}</div>${task.remark ? `<div class="warning"><b>备注：</b><span class="prose">${esc(task.remark)}</span></div>` : ''}${task.status === 'Blocked' && task.blockedReason ? `<div class="warning"><b>阻塞说明：</b><span class="prose">${esc(task.blockedReason)}</span></div>`:''}</div>
       <div class="task-next"><span>下一步行动</span><div class="prose">${esc(task.next || '暂未设置下一步行动')}</div></div>
     </section>
     <details class="task-requirements"><summary>需求和交付标准</summary><div class="requirements-body"><div><h4>任务要求</h4><div class="prose">${esc(task.requirement || '暂无任务要求')}</div></div><div><h4>交付对象或标准</h4><div class="prose">${esc(task.delivery || '暂未填写')}</div></div><p class="subtle">创建于 ${dateText(task.createdAt)}</p></div></details>
