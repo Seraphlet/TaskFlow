@@ -7,12 +7,14 @@ const notifications = new NoopNotificationAdapter();
 const notesCredentials = new NotesCredentialStore();
 const app = document.querySelector('#app');
 const STATUS = ['Todo', 'Doing', 'Blocked', 'Done'];
-const state = { route: 'tasks', taskId: null, noteId: null, companyId: null, companyName: '', search: '', status: 'All', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null };
+const STATUS_LABELS = { Todo: '待办', Doing: '进行中', Blocked: '已阻塞', Done: '已完成' };
+const FIELD_LABELS = { status: '任务状态', currentSummary: '当前整体进度', next: '下一步行动', blockedReason: '阻塞说明', owner: '负责人' };
+const state = { route: 'tasks', taskId: null, noteId: null, companyId: null, companyName: '', search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const dateText = (iso) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
-const badge = (status) => `<span class="badge ${status.toLowerCase()}">${status}</span>`;
+const badge = (status) => `<span class="badge ${String(status || 'Todo').toLowerCase()}">${esc(STATUS_LABELS[status] || status || '待办')}</span>`;
 
 async function loadData() {
   await storage.init();
@@ -72,9 +74,9 @@ function taskList() {
   const counts = Object.fromEntries(STATUS.map((s) => [s, state.data.tasks.filter((t) => t.status === s).length]));
   return shell(`<section class="page">
     <div class="page-head"><div><h3>任务总览</h3><p>聚焦要求、当前进度与下一步。</p></div><button class="btn primary" data-open="new-task">＋ 新建任务</button></div>
-    <div class="stat-row">${STATUS.map((s) => `<div class="card stat"><span>${s}</span><b>${counts[s]}</b></div>`).join('')}</div>
+    <div class="stat-row">${STATUS.map((s) => `<div class="card stat"><span>${STATUS_LABELS[s]}</span><b>${counts[s]}</b></div>`).join('')}</div>
     <div class="toolbar"><div class="search"><span>⌕</span><label class="sr-only" for="task-search">搜索任务</label><input id="task-search" class="input" type="search" placeholder="搜索任务、要求或负责人" value="${esc(state.search)}"></div>
-      <select id="status-filter" class="select filter" aria-label="状态筛选"><option>All</option>${STATUS.map((s) => `<option ${state.status === s ? 'selected':''}>${s}</option>`).join('')}</select></div>
+      <select id="status-filter" class="select filter" aria-label="状态筛选"><option value="All">全部状态</option>${STATUS.map((s) => `<option value="${s}" ${state.status === s ? 'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}</select></div>
     <div class="card task-table">${tasks.length ? `<table><thead><tr><th>任务</th><th>状态</th><th>负责人</th><th>下一步</th><th>更新</th></tr></thead><tbody>${tasks.map((t) => `<tr class="click-row" data-task="${t.id}"><td><div class="title-cell">${esc(t.title)}</div><div class="subtle">${esc(t.requirement.slice(0,70))}</div></td><td>${badge(t.status)}</td><td>${esc(t.ownerName || '未分配')}</td><td>${esc(t.next || '—')}</td><td class="subtle">${dateText(t.updatedAt)}</td></tr>`).join('')}</tbody></table>` : empty('还没有匹配的任务','新建一个任务，开始记录进展。')}</div>
   </section>`, 'TaskFlow', `${state.data.tasks.length} 个任务 · 本地持久化`);
 }
@@ -84,28 +86,31 @@ function taskDetail() {
   if (!task) { state.route = 'tasks'; return taskList(); }
   const activities = state.data.activity.filter((a) => a.taskId === task.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
   const handoffs = state.data.handoffs.filter((h) => h.taskId === task.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
-  return shell(`<section class="page">
+  const showingActivity = state.taskHistoryTab !== 'handoffs';
+  return shell(`<section class="page task-detail-page">
     <button class="back-link" data-nav="tasks">← 返回任务列表</button>
-    <div class="page-head"><div><h3>${esc(task.title)}</h3><p>${badge(task.status)}</p></div><div><button class="btn" data-open="update-task">更新进度</button> <button class="btn dark" data-open="handoff">交接</button> <button class="btn danger" data-delete-task="${task.id}">删除</button></div></div>
-    <div class="detail-grid"><div class="detail-main">
-      <article class="card section highlight"><h4>Requirement · 任务要求</h4><div class="prose">${esc(task.requirement)}</div></article>
-      <article class="card section"><h4>Current Summary · 当前整体进度</h4><div class="prose">${esc(task.currentSummary || '暂无进度总结')}</div>${task.blockedReason ? `<div class="warning" style="margin-top:14px"><b>阻塞说明：</b>${esc(task.blockedReason)}</div>`:''}</article>
-      <article class="card section next-box"><h4>Next · 下一步</h4><div class="prose">${esc(task.next || '暂未设置')}</div></article>
-      <article class="card section"><h4>Activity · 更新记录</h4>${activities.length ? `<div class="timeline">${activities.map(activityItem).join('')}</div>` : '<p class="subtle">暂无记录</p>'}</article>
-      <article class="card section"><h4>Handoff History · 交接历史</h4>${handoffs.length ? `<div class="timeline">${handoffs.map(handoffItem).join('')}</div>` : '<p class="subtle">暂无交接记录</p>'}</article>
-    </div><aside class="detail-side"><article class="card section"><h4>任务信息</h4><div class="meta-list">
-      <div class="meta-item"><span>状态</span><b>${task.status}</b></div><div class="meta-item"><span>负责人</span><b>${esc(task.ownerName || '未分配')}</b></div><div class="meta-item"><span>交付对象</span><b>${esc(task.delivery || '—')}</b></div><div class="meta-item"><span>创建时间</span><b>${dateText(task.createdAt)}</b></div><div class="meta-item"><span>最近更新</span><b>${dateText(task.updatedAt)}</b></div>
-    </div></article></aside></div>
+    <header class="task-detail-head"><div><div class="task-title-line"><h3>${esc(task.title)}</h3>${badge(task.status)}</div><div class="task-meta"><span><b>负责人</b>${esc(task.ownerName || '未分配')}</span><span><b>最近更新</b>${dateText(task.updatedAt || task.createdAt)}</span></div></div><button class="btn danger small" data-delete-task="${task.id}">删除任务</button></header>
+    <div class="task-description"><span>任务说明</span><div class="prose">${esc(task.requirement || '暂无任务说明')}</div></div>
+    <div class="task-actions" aria-label="任务操作"><button class="btn primary" data-open="update-task">更新进度</button><button class="btn dark" data-open="handoff">交接任务</button></div>
+    <section class="task-focus" aria-label="任务当前情况">
+      <div class="task-summary"><h4>当前进度</h4><div class="prose">${esc(task.currentSummary || '暂未填写整体进度')}</div>${task.status === 'Blocked' && task.blockedReason ? `<div class="warning"><b>阻塞说明：</b><span class="prose">${esc(task.blockedReason)}</span></div>`:''}</div>
+      <div class="task-next"><span>下一步行动</span><div class="prose">${esc(task.next || '暂未设置下一步行动')}</div></div>
+    </section>
+    <details class="task-requirements"><summary>需求和交付标准</summary><div class="requirements-body"><div><h4>任务要求</h4><div class="prose">${esc(task.requirement || '暂无任务要求')}</div></div><div><h4>交付对象或标准</h4><div class="prose">${esc(task.delivery || '暂未填写')}</div></div><p class="subtle">创建于 ${dateText(task.createdAt)}</p></div></details>
+    <section class="task-history"><div class="history-tabs" role="tablist" aria-label="任务历史"><button class="history-tab ${showingActivity ? 'active':''}" type="button" role="tab" aria-selected="${showingActivity}" data-history-tab="activity">进度记录 <span>${activities.length}</span></button><button class="history-tab ${showingActivity ? '':'active'}" type="button" role="tab" aria-selected="${!showingActivity}" data-history-tab="handoffs">交接历史 <span>${handoffs.length}</span></button></div>
+      <div class="history-panel" role="tabpanel">${showingActivity ? (activities.length ? `<div class="timeline">${activities.map(activityItem).join('')}</div>` : '<p class="subtle">暂无进度记录</p>') : (handoffs.length ? `<div class="timeline">${handoffs.map(handoffItem).join('')}</div>` : '<p class="subtle">暂无交接记录</p>')}</div>
+    </section>
   </section>`, '任务详情', task.title);
 }
 
 function activityItem(a) {
-  const changes = (a.changes || []).map((c) => `${c.field}：${c.from || '空'} → ${c.to || '空'}`).join('；');
-  return `<div class="event"><div class="event-head"><b>${esc(a.actor || '未署名')}</b><time>${dateText(a.createdAt)}</time></div><div class="subtle">${esc(a.type === 'handoff' ? '任务交接' : a.type === 'created' ? '创建任务' : '进度更新')}</div>${a.progress ? `<p>${esc(a.progress)}</p>`:''}${changes ? `<p class="subtle">${esc(changes)}</p>`:''}</div>`;
+  const changeValue = (change, value) => change.field === 'status' ? (STATUS_LABELS[value] || value || '空') : (value || '空');
+  const changes = (a.changes || []).map((c) => `${FIELD_LABELS[c.field] || c.field}：${changeValue(c, c.from)} → ${changeValue(c, c.to)}`).join('；');
+  return `<div class="event"><div class="event-head"><div><b>${esc(a.actor || '未署名')}</b><span class="event-kind">${esc(a.type === 'handoff' ? '任务交接' : a.type === 'created' ? '创建任务' : '进度更新')}</span></div><time>${dateText(a.createdAt)}</time></div>${a.progress ? `<div class="event-content prose">${esc(a.progress)}</div>`:''}${changes ? `<p class="event-changes">${esc(changes)}</p>`:''}</div>`;
 }
 
 function handoffItem(h) {
-  return `<div class="event"><div class="event-head"><b>${esc(h.fromName || '未分配')} → ${esc(h.toName)}</b><time>${dateText(h.createdAt)}</time></div>${h.note ? `<p>${esc(h.note)}</p>`:''}<p class="subtle">快照：${h.status} · ${esc(h.currentSummary || '无总结')} · 下一步：${esc(h.next || '无')}</p></div>`;
+  return `<div class="event handoff-event"><div class="event-head"><div><b>${esc(h.fromName || '未分配')} → ${esc(h.toName || '未知成员')}</b><span class="event-kind">由 ${esc(h.actor || '历史记录未注明操作人')} 操作</span></div><time>${dateText(h.createdAt)}</time></div>${h.note ? `<div class="event-content prose">${esc(h.note)}</div>`:''}<dl class="snapshot"><div><dt>交接时状态</dt><dd>${esc(STATUS_LABELS[h.status] || h.status || '未记录')}</dd></div><div><dt>整体进度快照</dt><dd class="prose">${esc(h.currentSummary || '无')}</dd></div><div><dt>下一步快照</dt><dd class="prose">${esc(h.next || '无')}</dd></div></dl></div>`;
 }
 
 function noteCard(note) {
@@ -205,13 +210,22 @@ function memberOptions(selected = '') {
   return `<option value="">未分配</option>${state.data.team.map((m) => `<option value="${m.id}" ${selected === m.id ? 'selected':''}>${esc(m.name)}</option>`).join('')}`;
 }
 
+function isCurrentOwner(task, member) {
+  return member.id === task.ownerId || (!task.ownerId && task.ownerName && member.name === task.ownerName);
+}
+
+function handoffMemberOptions(task) {
+  const members = state.data.team.filter((member) => !isCurrentOwner(task, member));
+  return `<option value="">请选择接手人</option>${members.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}`;
+}
+
 function renderDrawer() {
   if (!state.drawer) return '';
   const d = state.drawer;
   let title = '', body = '', submit = '';
-  if (d.type === 'new-task') { title='新建任务'; submit='创建任务'; body=`<div class="field"><label>Title <span>*</span></label><input class="input" name="title" required maxlength="120"></div><div class="field"><label>Requirement <span>*</span></label><textarea class="textarea" name="requirement" required></textarea></div><div class="two-col"><div class="field"><label>Owner</label><select class="select" name="ownerId">${memberOptions()}</select></div><div class="field"><label>Delivery</label><input class="input" name="delivery"></div></div><div class="field"><label>Next</label><textarea class="textarea" name="next"></textarea></div>`; }
-  if (d.type === 'update-task') { const t=state.data.tasks.find((x)=>x.id===state.taskId); title='更新任务'; submit='保存更新'; body=`<div class="field"><label>Updated By</label><input class="input" name="actor" placeholder="你的名字"></div><div class="field"><label>Status</label><select class="select" name="status" id="update-status">${STATUS.map((s)=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></div><div class="field"><label>Progress</label><textarea class="textarea" name="progress" placeholder="本次做了什么（将追加到 Activity）"></textarea></div><div class="field"><label>Current Summary</label><textarea class="textarea" name="currentSummary">${esc(t.currentSummary||'')}</textarea></div><div class="field"><label>Next</label><textarea class="textarea" name="next">${esc(t.next||'')}</textarea></div><div class="field blocked-field" id="blocked-wrap" ${t.status==='Blocked'?'':'hidden'}><label>阻塞说明</label><textarea class="textarea" name="blockedReason">${esc(t.blockedReason||'')}</textarea></div>`; }
-  if (d.type === 'handoff') { const t=state.data.tasks.find((x)=>x.id===state.taskId); title='交接任务'; submit='确认交接'; body=`<div class="field"><label>From</label><input class="input" value="${esc(t.ownerName||'未分配')}" disabled></div><div class="field"><label>To <span>*</span></label><select class="select" name="toId" required>${memberOptions()}</select></div><div class="field"><label>Note</label><textarea class="textarea" name="note" placeholder="交接背景或注意事项"></textarea></div><p class="field-hint">确认后将保存当前状态、进度总结与下一步快照。</p>`; }
+  if (d.type === 'new-task') { title='新建任务'; submit='创建任务'; body=`<div class="field"><label>任务名称 <span>*</span></label><input class="input" name="title" required maxlength="120"></div><div class="field"><label>任务要求 <span>*</span></label><textarea class="textarea" name="requirement" required></textarea></div><div class="two-col"><div class="field"><label>负责人</label><select class="select" name="ownerId">${memberOptions()}</select></div><div class="field"><label>交付对象或标准</label><input class="input" name="delivery"></div></div><div class="field"><label>下一步行动</label><textarea class="textarea" name="next"></textarea></div>`; }
+  if (d.type === 'update-task') { const t=state.data.tasks.find((x)=>x.id===state.taskId); title='更新进度'; submit='保存更新'; body=`<div class="field"><label>更新人</label><input class="input" name="actor" placeholder="填写本次更新的操作人"></div><div class="field"><label>本次进展</label><textarea class="textarea" name="progress" placeholder="本次做了什么？填写后会追加到进度记录，不会覆盖历史。" autofocus></textarea></div><div class="field"><label>下一步行动</label><textarea class="textarea" name="next" placeholder="接下来要做什么？">${esc(t.next||'')}</textarea></div><div class="field"><label>任务状态</label><select class="select" name="status" id="update-status">${STATUS.map((s)=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}</select></div><div class="field blocked-field" id="blocked-wrap" ${t.status==='Blocked'?'':'hidden'}><label>阻塞说明</label><textarea class="textarea" name="blockedReason" placeholder="说明当前阻塞原因">${esc(t.blockedReason||'')}</textarea></div><details class="optional-field"><summary>编辑当前整体进度（可选）</summary><div class="field"><label>当前整体进度</label><textarea class="textarea" name="currentSummary" placeholder="不修改即可保留原内容">${esc(t.currentSummary||'')}</textarea><div class="field-hint">这里保存任务目前的整体情况；本次进展会单独追加到历史记录。</div></div></details>`; }
+  if (d.type === 'handoff') { const t=state.data.tasks.find((x)=>x.id===state.taskId); const available=state.data.team.some((m)=>!isCurrentOwner(t,m)); title='交接任务'; submit='确认交接'; body=`<div class="field"><label>当前负责人</label><input class="input" value="${esc(t.ownerName||'未分配')}" disabled></div><div class="field"><label>接手人 <span>*</span></label><select class="select" name="toId" id="handoff-to" required ${available?'':'disabled'}>${handoffMemberOptions(t)}</select>${available?'':'<div class="field-hint error-text">Team 中没有其他可接手的成员，请先到 Settings 添加成员。</div>'}</div><div class="field"><label>实际操作人 <span>*</span></label><input class="input" name="actor" required placeholder="谁正在执行这次交接"></div><div class="field"><label>交接说明</label><textarea class="textarea" name="note" placeholder="交接背景、注意事项或待处理内容"></textarea></div><div class="handoff-confirm" id="handoff-confirm">请选择接手人。确认后将保存任务状态、整体进度和下一步快照。</div>`; }
   if (d.type === 'new-company') { title='添加公司'; submit='添加'; body=`<div class="field"><label>公司名称 <span>*</span></label><input class="input" name="name" required maxlength="120"></div>`; }
   if (d.type === 'new-comment' || d.type === 'edit-comment') { const c=state.data.comments.find((x)=>x.id===d.id); title=d.type==='new-comment'?'新增留言':'编辑留言'; submit=d.type==='new-comment'?'保存留言':'保存修改'; body=`<div class="field"><label>Content <span>*</span></label><textarea class="textarea" name="content" required placeholder="以个人记录的方式写下你的观察">${esc(c?.content||'')}</textarea><div class="field-hint">留言只保存在本地，不代表平台认定的事实。</div></div>`; }
   if (['new-note','new-company-note','edit-note'].includes(d.type)) { const n=state.notes.find((x)=>x.id===d.id); const company=d.type==='new-company-note' ? state.companyName : n?.companyName || ''; title=d.type==='edit-note'?'编辑 Note':d.type==='new-company-note'?'添加公司记录':'Quick Note'; submit=d.type==='edit-note'?'保存修改':'保存 Note'; body=`<div class="field"><label>Content <span>*</span></label><textarea class="textarea note-editor" name="content" required autofocus placeholder="直接粘贴文字、网址、经历或临时想法">${esc(n?.content||'')}</textarea></div><div class="field"><label>Title <small>可选</small></label><input class="input" name="title" maxlength="160" value="${esc(n?.title||'')}"></div><div class="field"><label>Company <small>可选</small></label><input class="input" name="companyName" maxlength="160" value="${esc(company)}" ${d.type==='new-company-note' && state.companyName ? 'readonly':''}><div class="field-hint">填写后会自动聚合到 Company Watch。</div></div><label class="check-row"><input type="checkbox" name="pinned" ${n?.pinned?'checked':''}> 置顶</label><div class="source-banner"><span>保存到</span><b>${esc(state.notesMode)}</b><span>${state.notesMode==='Memos'?'不会自动复制到 Local。':'不会自动上传到 Memos。'}</span></div>${d.type==='edit-note'?`<button type="button" class="btn danger" data-delete-note="${esc(n.id)}">删除这条 Note</button>`:''}`; }
@@ -248,14 +262,19 @@ async function onSubmit(form) {
     const task=state.data.tasks.find((t)=>t.id===state.taskId); const changes=[];
     const updates={ status:fd.get('status'), currentSummary:fd.get('currentSummary').trim(), next:fd.get('next').trim(), blockedReason:fd.get('status')==='Blocked'?fd.get('blockedReason').trim():'', updatedAt:timestamp };
     ['status','currentSummary','next','blockedReason'].forEach((field)=>{ if ((task[field]||'') !== (updates[field]||'')) changes.push({field,from:task[field]||'',to:updates[field]||''}); });
-    if (fd.get('progress').trim() || changes.length) await storage.put('activity',{id:uid('activity'),taskId:task.id,type:'update',actor:fd.get('actor').trim()||'未署名',progress:fd.get('progress').trim(),changes,createdAt:timestamp});
+    if (!fd.get('progress').trim() && !changes.length) { toast('没有检测到需要保存的更新','error'); return; }
+    await storage.put('activity',{id:uid('activity'),taskId:task.id,type:'update',actor:fd.get('actor').trim()||'未署名',progress:fd.get('progress').trim(),changes,createdAt:timestamp});
     await storage.put('tasks',{...task,...updates}); state.drawer=null; await refresh('任务已更新，历史记录已追加');
   }
   if (d.type === 'handoff') {
     const task=state.data.tasks.find((t)=>t.id===state.taskId); const to=state.data.team.find((m)=>m.id===fd.get('toId'));
     if (!to) { toast('请选择接手人','error'); return; }
-    const handoff={id:uid('handoff'),taskId:task.id,fromId:task.ownerId||'',fromName:task.ownerName||'未分配',toId:to.id,toName:to.name,note:fd.get('note').trim(),status:task.status,currentSummary:task.currentSummary,next:task.next,createdAt:timestamp};
-    await storage.put('handoffs',handoff); await storage.put('tasks',{...task,ownerId:to.id,ownerName:to.name,updatedAt:timestamp}); await storage.put('activity',{id:uid('activity'),taskId:task.id,type:'handoff',actor:to.name,progress:`${handoff.fromName} 将任务交接给 ${to.name}${handoff.note ? `：${handoff.note}`:''}`,changes:[{field:'owner',from:handoff.fromName,to:to.name}],createdAt:timestamp});
+    if (isCurrentOwner(task,to)) { toast('不能交接给当前负责人','error'); return; }
+    const actor=fd.get('actor').trim();
+    if (!actor) { toast('请填写实际操作人','error'); return; }
+    if (!confirm(`确认后任务负责人将变更为 ${to.name}。`)) return;
+    const handoff={id:uid('handoff'),taskId:task.id,fromId:task.ownerId||'',fromName:task.ownerName||'未分配',toId:to.id,toName:to.name,actor,note:fd.get('note').trim(),status:task.status,currentSummary:task.currentSummary||'',next:task.next||'',createdAt:timestamp};
+    await storage.put('handoffs',handoff); await storage.put('tasks',{...task,ownerId:to.id,ownerName:to.name,updatedAt:timestamp}); await storage.put('activity',{id:uid('activity'),taskId:task.id,type:'handoff',actor,progress:`${handoff.fromName} 将任务交接给 ${to.name}${handoff.note ? `：${handoff.note}`:''}`,changes:[{field:'owner',from:handoff.fromName,to:to.name}],createdAt:timestamp});
     await notifications.notify(NotificationEvents.TaskHandedOff,formatTaskNotification(NotificationEvents.TaskHandedOff,task,handoff.note)); state.drawer=null; await refresh('任务已交接并保存快照');
   }
   if (d.type === 'new-company') { const name=fd.get('name').trim(); if(state.data.companies.some((c)=>c.name.toLowerCase()===name.toLowerCase())) { toast('该公司已存在','error'); return; } await storage.put('companies',{id:uid('company'),name,createdAt:timestamp}); state.drawer=null; await refresh('公司已添加'); }
@@ -322,7 +341,8 @@ app.addEventListener('click', async (e) => {
   const editNote=e.target.closest('[data-edit-note]'); if(editNote){openDrawer('edit-note',editNote.dataset.editNote);return;}
   const watchCompany=e.target.closest('[data-watch-company]'); if(watchCompany){state.companyName=watchCompany.dataset.watchCompany;state.route='company-watch-detail';render();return;}
   const note=e.target.closest('[data-note]'); if(note){openDrawer('edit-note',note.dataset.note);return;}
-  const task=e.target.closest('[data-task]'); if(task){state.taskId=task.dataset.task;state.route='task-detail';render();return;}
+  const task=e.target.closest('[data-task]'); if(task){state.taskId=task.dataset.task;state.taskHistoryTab='activity';state.route='task-detail';render();return;}
+  const historyTab=e.target.closest('[data-history-tab]'); if(historyTab){state.taskHistoryTab=historyTab.dataset.historyTab;render();return;}
   const company=e.target.closest('[data-company]'); if(company){state.companyId=company.dataset.company;state.route='company-detail';render();return;}
   const editComment=e.target.closest('[data-edit-comment]'); if(editComment){openDrawer('edit-comment',editComment.dataset.editComment);return;}
   const editMember=e.target.closest('[data-edit-member]'); if(editMember){openDrawer('edit-member',editMember.dataset.editMember);return;}
@@ -343,7 +363,7 @@ app.addEventListener('click', async (e) => {
 
 app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'){e.preventDefault();try{await onSubmit(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
 app.addEventListener('input', (e) => { if(['task-search','company-search','note-search','company-watch-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);} });
-app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='update-status'){document.querySelector('#blocked-wrap').hidden=e.target.value!=='Blocked';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
+app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='update-status'){document.querySelector('#blocked-wrap').hidden=e.target.value!=='Blocked';} if(e.target.id==='handoff-to'){const member=state.data.team.find((m)=>m.id===e.target.value);const hint=document.querySelector('#handoff-confirm');if(hint)hint.textContent=member?`确认后任务负责人将变更为 ${member.name}。同时保存当前任务快照。`:'请选择接手人。确认后将保存任务状态、整体进度和下一步快照。';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});
 
 loadData()
