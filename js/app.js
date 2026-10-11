@@ -1,11 +1,13 @@
 const { LocalStorageAdapter, STORES } = window.TaskFlowStorage;
 const { NoopNotificationAdapter, NotificationEvents, formatTaskNotification } = window.TaskFlowNotifications;
+const { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore } = window.TaskFlowNotes;
 
 const storage = new LocalStorageAdapter();
 const notifications = new NoopNotificationAdapter();
+const notesCredentials = new NotesCredentialStore();
 const app = document.querySelector('#app');
 const STATUS = ['Todo', 'Doing', 'Blocked', 'Done'];
-const state = { route: 'tasks', taskId: null, companyId: null, search: '', status: 'All', drawer: null, data: {} };
+const state = { route: 'tasks', taskId: null, noteId: null, companyId: null, companyName: '', search: '', status: 'All', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
@@ -16,6 +18,21 @@ async function loadData() {
   await storage.init();
   const entries = await Promise.all(STORES.map(async (name) => [name, await storage.all(name)]));
   state.data = Object.fromEntries(entries);
+  await loadNotes();
+}
+
+function currentNotesAdapter() {
+  const config = notesCredentials.getConfig();
+  if (config.mode !== 'Memos') return new LocalNotesAdapter(storage);
+  return new MemosNotesAdapter({ serverUrl: config.serverUrl, token: notesCredentials.getToken(), apiBase: config.apiBase });
+}
+
+async function loadNotes() {
+  const config = notesCredentials.getConfig();
+  state.notesMode = config.mode === 'Memos' ? 'Memos' : 'Local';
+  state.notesError = '';
+  try { state.notes = await currentNotesAdapter().list(); }
+  catch (error) { state.notes = []; state.notesError = error.message; }
 }
 
 function toast(message, type = '') {
@@ -32,17 +49,18 @@ function shell(content, title, subtitle) {
       <div class="brand"><div class="brand-mark">TF</div><div><h1>TaskFlow</h1><small>Local workspace</small></div></div>
       <nav class="nav-list" aria-label="主导航">
         ${navButton('tasks','▣','TaskFlow')}
-        ${navButton('companies','▥','公司吐槽墙')}
+        ${navButton('notes','✎','Notes')}
+        ${navButton('company-watch','◎','Company Watch')}
         ${navButton('settings','⚙','Settings')}
       </nav>
-      <div class="local-note">数据仅保存在当前浏览器。<br>定期导出 JSON 备份。</div>
+      <div class="local-note">Tasks 默认保存在当前浏览器。<br>Notes 数据源：${esc(state.notesMode)}</div>
     </aside>
-    <main class="main"><header class="topbar"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><span class="badge done">Local</span></header>${content}</main>
+    <main class="main"><header class="topbar"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><span class="badge ${state.notesMode === 'Memos' ? 'doing' : 'done'}">${['notes','company-watch','company-watch-detail'].includes(state.route) ? esc(state.notesMode) : 'Local'}</span></header>${content}</main>
   </div>${renderDrawer()}`;
 }
 
 function navButton(route, icon, label) {
-  const active = (state.route === route || (route === 'tasks' && state.route === 'task-detail') || (route === 'companies' && state.route === 'company-detail')) ? 'active' : '';
+  const active = (state.route === route || (route === 'tasks' && state.route === 'task-detail') || (route === 'company-watch' && state.route === 'company-watch-detail')) ? 'active' : '';
   return `<button class="nav-btn ${active}" data-nav="${route}"><span class="nav-icon">${icon}</span>${label}</button>`;
 }
 
@@ -90,6 +108,51 @@ function handoffItem(h) {
   return `<div class="event"><div class="event-head"><b>${esc(h.fromName || '未分配')} → ${esc(h.toName)}</b><time>${dateText(h.createdAt)}</time></div>${h.note ? `<p>${esc(h.note)}</p>`:''}<p class="subtle">快照：${h.status} · ${esc(h.currentSummary || '无总结')} · 下一步：${esc(h.next || '无')}</p></div>`;
 }
 
+function noteCard(note) {
+  return `<article class="card note-card" data-note="${esc(note.id)}">
+    <div class="note-card-head"><div>${note.pinned ? '<span class="pin">置顶</span>' : ''}${note.companyName ? `<span class="company-chip">${esc(note.companyName)}</span>` : ''}</div><span class="subtle">${dateText(note.updatedAt)}</span></div>
+    ${note.title ? `<h4>${esc(note.title)}</h4>` : ''}<div class="prose note-preview">${esc(note.content)}</div>
+    <div class="note-card-foot"><span class="subtle">${esc(state.notesMode)} · ${note.updatedAt !== note.createdAt ? '已编辑' : '已保存'}</span><button class="btn small" data-edit-note="${esc(note.id)}">编辑</button></div>
+  </article>`;
+}
+
+function notesPage() {
+  const q = state.search.toLowerCase();
+  const notes = [...state.notes].filter((n) => !q || `${n.title || ''} ${n.content} ${n.companyName || ''}`.toLowerCase().includes(q)).sort((a,b) => Number(b.pinned)-Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
+  const unavailable = state.notesError ? `<div class="warning"><b>${esc(state.notesMode)} 当前不可用：</b>${esc(state.notesError)}。数据源未自动切换，也没有伪装为保存成功。</div>` : '';
+  return shell(`<section class="page"><div class="page-head"><div><h3>Notes</h3><p>随手记录文字、网址、面试经历和临时想法。</p></div><button class="btn primary" data-open="new-note" ${state.notesError ? 'disabled':''}>＋ Quick Note</button></div>
+    <div class="source-banner"><span>当前数据源</span><b>${esc(state.notesMode)}</b><span>${state.notesMode === 'Memos' ? '仅显示 TaskFlow 管理的远端 Memos，不与 Local 自动同步。' : '保存在当前浏览器的 IndexedDB。'}</span></div>${unavailable}
+    <div class="toolbar"><div class="search"><span>⌕</span><label class="sr-only" for="note-search">搜索笔记</label><input id="note-search" class="input" type="search" placeholder="搜索标题、正文或公司" value="${esc(state.search)}"></div></div>
+    ${notes.length ? `<div class="notes-grid">${notes.map(noteCard).join('')}</div>` : `<div class="card">${empty(state.notesError ? '当前数据源不可用' : '还没有笔记', state.notesError ? '请前往 Settings 检查 Memos 连接或切换回 Local。' : '用 Quick Note 记下第一条内容。')}</div>`}
+  </section>`, 'Notes', `${notes.length} 条笔记 · ${state.notesMode}`);
+}
+
+function companyGroups() {
+  const groups = new Map();
+  state.notes.filter((n) => n.companyName?.trim()).forEach((note) => {
+    const key = note.companyName.trim().toLocaleLowerCase();
+    if (!groups.has(key)) groups.set(key, { name: note.companyName.trim(), notes: [] });
+    groups.get(key).notes.push(note);
+  });
+  return [...groups.values()].sort((a,b) => a.name.localeCompare(b.name, 'zh-CN'));
+}
+
+function companyWatchPage() {
+  const q = state.search.toLowerCase();
+  const groups = companyGroups().filter((g) => !q || g.name.toLowerCase().includes(q));
+  return shell(`<section class="page"><div class="page-head"><div><h3>Company Watch</h3><p>基于当前 Notes 数据源中的公司关联记录聚合，仅作为个人线索。</p></div><button class="btn primary" data-open="new-company-note" ${state.notesError ? 'disabled':''}>＋ 添加公司记录</button></div>
+    <div class="source-banner"><span>当前数据源</span><b>${esc(state.notesMode)}</b><span>公司记录与 Notes 共用数据，不复制数据库。</span></div>
+    ${state.notesError ? `<div class="warning">${esc(state.notesError)}</div>` : ''}
+    <div class="toolbar"><div class="search"><span>⌕</span><label class="sr-only" for="company-watch-search">搜索公司</label><input id="company-watch-search" class="input" type="search" placeholder="搜索公司名称" value="${esc(state.search)}"></div></div>
+    ${groups.length ? `<div class="company-grid">${groups.map((g) => `<article class="card company-card" data-watch-company="${esc(g.name)}"><h4>${esc(g.name)}</h4><div class="company-count"><span>个人记录</span><span><b>${g.notes.length}</b> 条 →</span></div></article>`).join('')}</div>` : `<div class="card">${empty('还没有公司记录','在 Notes 中填写公司名称后，会自动聚合到这里。')}</div>`}
+  </section>`, 'Company Watch', `${groups.length} 家公司 · ${state.notesMode}`);
+}
+
+function companyWatchDetail() {
+  const notes = state.notes.filter((n) => n.companyName?.trim().toLocaleLowerCase() === state.companyName.toLocaleLowerCase()).sort((a,b) => Number(b.pinned)-Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
+  return shell(`<section class="page"><button class="back-link" data-nav="company-watch">← 返回 Company Watch</button><div class="page-head"><div><h3>${esc(state.companyName)}</h3><p>${notes.length} 条个人线索 · 不代表平台认定的事实</p></div><button class="btn primary" data-open="new-company-note">＋ 添加记录</button></div><div class="notes-grid">${notes.map(noteCard).join('')}</div></section>`, state.companyName, `${notes.length} 条记录 · ${state.notesMode}`);
+}
+
 function companyList() {
   const companies = state.data.companies.filter((c) => !state.search || c.name.toLowerCase().includes(state.search.toLowerCase())).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
   return shell(`<section class="page"><div class="page-head"><div><h3>公司吐槽墙</h3><p>以个人原始记录的方式，按公司聚合留言。</p></div><button class="btn primary" data-open="new-company">＋ 添加公司</button></div>
@@ -116,12 +179,24 @@ function teamSettings() {
 }
 
 function settingsPage() {
+  const config = notesCredentials.getConfig();
+  const legacyCount = state.data.comments.length;
   return shell(`<section class="page"><div class="page-head"><div><h3>Settings</h3><p>存储状态、团队和备份。</p></div></div>
-    <div class="settings-grid"><article class="card setting-card"><h4>服务状态</h4><div class="setting-row"><span>Storage Mode</span><span class="setting-value ready">Local</span></div><div class="setting-row"><span>Server</span><span class="setting-value muted">Not Configured</span></div><div class="setting-row"><span>Email Notification</span><span class="setting-value muted">Not Configured</span></div></article>
-      <article class="card setting-card"><h4>数据备份</h4><p class="subtle">导入采用合并策略；相同 ID 的已有记录会保留，不会直接覆盖。</p><div class="import-box"><button class="btn dark" id="export-data">导出 JSON</button><label class="btn" for="import-data">导入 JSON</label><input class="sr-only" id="import-data" type="file" accept="application/json,.json"></div><div class="warning" style="margin-top:18px">浏览器存储不是云端备份。清除站点数据、浏览器重置或更换设备均可能导致数据丢失。</div></article>
+    <div class="settings-grid"><article class="card setting-card"><h4>TaskFlow 服务状态</h4><p class="subtle">任务存储与 Notes 存储相互独立。</p><div class="setting-row"><span>Task Storage</span><span class="setting-value ready">Local</span></div><div class="setting-row"><span>Remote Adapter</span><span class="setting-value muted">Not Configured</span></div><div class="setting-row"><span>Email Notification</span><span class="setting-value muted">Not Configured</span></div></article>
+      <article class="card setting-card"><h4>数据备份</h4><p class="subtle">覆盖本地 Tasks、Notes、Team、旧版公司墙及历史记录。导入采用合并策略，相同 ID 保留已有记录；Memos 远端笔记和访问令牌不会导出。</p><div class="import-box"><button class="btn dark" id="export-data">导出本地 JSON</button><label class="btn" for="import-data">导入 JSON</label><input class="sr-only" id="import-data" type="file" accept="application/json,.json"></div><div class="warning" style="margin-top:18px">浏览器存储不是云端备份。file:// 数据可能按浏览器与文件路径隔离，清除站点数据仍会导致丢失。</div></article>
+      <article class="card setting-card notes-storage-card"><h4>Notes Storage</h4><div class="setting-row"><span>当前模式</span><span class="setting-value ${config.mode === 'Memos' ? 'remote' : 'ready'}">${esc(config.mode || 'Local')}</span></div>
+        <div class="field"><label>Memos Server URL</label><input class="input" id="memos-url" type="url" placeholder="https://memos.example.com" value="${esc(config.serverUrl || '')}"><div class="field-hint">可粘贴设置页链接；连接时会自动提取站点根地址，不会把页面路径或 #fragment 当成 API 路径。</div></div>
+        <div class="field"><label>API 版本</label><select class="select" id="memos-api"><option value="auto">自动检测</option><option value="/api" ${config.apiBase === '/api' ? 'selected':''}>26.10 / Latest（/api）</option><option value="/api/v1" ${config.apiBase === '/api/v1' ? 'selected':''}>0.30–0.31（/api/v1）</option></select></div>
+        <div class="field"><label>Access Token</label><input class="input" id="memos-token" type="password" autocomplete="off" placeholder="不会回显或写入备份"><div class="field-hint">Token 不进入 URL、日志、源码或 JSON 导出。</div></div>
+        <label class="check-row"><input id="remember-token" type="checkbox" ${config.remember ? 'checked':''}> 记住令牌（默认关闭；同源脚本或浏览器扩展可能读取本地凭据）</label>
+        <div class="import-box"><button class="btn" data-test-memos>Test Connection</button><button class="btn primary" data-connect-memos>Connect</button>${config.mode === 'Memos' ? '<button class="btn" data-disconnect-memos>切回 Local</button>' : ''}<button class="btn danger" data-clear-memos>Clear Credentials</button></div>
+        <div id="memos-test-status" class="field-hint">${state.notesError ? esc(state.notesError) : config.mode === 'Memos' ? `已连接 ${esc(config.serverUrl || '')}；仅操作 TaskFlow 标记的 Memos。` : '未配置时 Local 完整可用。连接测试成功后才可启用 Memos。'}</div>
+        <div class="warning">从 file:// 连接远程 Memos 可能被 CORS / Origin: null 策略拒绝。不会要求关闭浏览器安全功能，也不会使用第三方代理。</div>
+      </article>
       ${teamSettings()}
-      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">UI 通过 Storage Adapter 访问数据；Remote Adapter 已预留但未配置。通知接口仅定义 TaskCreated 与 TaskHandedOff，V1 不发送也不模拟邮件。</p></article>
-    </div></section>`, 'Settings', '本地模式 · 后端与邮件未配置');
+      <article class="card setting-card"><h4>旧版公司墙兼容</h4><p class="subtle">原 companies / comments 数据仍完整保留。可复制为 Local Notes；旧数据不会被删除，重复迁移会按固定 ID 跳过。</p><div class="setting-row"><span>旧版留言</span><b>${legacyCount} 条</b></div><div class="import-box"><button class="btn" data-open-legacy-wall>打开旧版公司墙</button><button class="btn" data-migrate-legacy ${legacyCount ? '' : 'disabled'}>复制到 Local Notes</button></div></article>
+      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">TaskFlow 继续通过既有 Storage Adapter 访问本地数据，Remote Adapter 预留未删除。Notes 使用独立的 LocalNotesAdapter / MemosNotesAdapter。通知接口仍仅定义 TaskCreated 与 TaskHandedOff，未配置时不模拟发送。</p></article>
+    </div></section>`, 'Settings', 'TaskFlow 与 Notes 存储独立配置');
 }
 
 function empty(title, text) { return `<div class="empty"><div class="empty-mark">◇</div><b>${esc(title)}</b><p>${esc(text)}</p></div>`; }
@@ -139,6 +214,7 @@ function renderDrawer() {
   if (d.type === 'handoff') { const t=state.data.tasks.find((x)=>x.id===state.taskId); title='交接任务'; submit='确认交接'; body=`<div class="field"><label>From</label><input class="input" value="${esc(t.ownerName||'未分配')}" disabled></div><div class="field"><label>To <span>*</span></label><select class="select" name="toId" required>${memberOptions()}</select></div><div class="field"><label>Note</label><textarea class="textarea" name="note" placeholder="交接背景或注意事项"></textarea></div><p class="field-hint">确认后将保存当前状态、进度总结与下一步快照。</p>`; }
   if (d.type === 'new-company') { title='添加公司'; submit='添加'; body=`<div class="field"><label>公司名称 <span>*</span></label><input class="input" name="name" required maxlength="120"></div>`; }
   if (d.type === 'new-comment' || d.type === 'edit-comment') { const c=state.data.comments.find((x)=>x.id===d.id); title=d.type==='new-comment'?'新增留言':'编辑留言'; submit=d.type==='new-comment'?'保存留言':'保存修改'; body=`<div class="field"><label>Content <span>*</span></label><textarea class="textarea" name="content" required placeholder="以个人记录的方式写下你的观察">${esc(c?.content||'')}</textarea><div class="field-hint">留言只保存在本地，不代表平台认定的事实。</div></div>`; }
+  if (['new-note','new-company-note','edit-note'].includes(d.type)) { const n=state.notes.find((x)=>x.id===d.id); const company=d.type==='new-company-note' ? state.companyName : n?.companyName || ''; title=d.type==='edit-note'?'编辑 Note':d.type==='new-company-note'?'添加公司记录':'Quick Note'; submit=d.type==='edit-note'?'保存修改':'保存 Note'; body=`<div class="field"><label>Content <span>*</span></label><textarea class="textarea note-editor" name="content" required autofocus placeholder="直接粘贴文字、网址、经历或临时想法">${esc(n?.content||'')}</textarea></div><div class="field"><label>Title <small>可选</small></label><input class="input" name="title" maxlength="160" value="${esc(n?.title||'')}"></div><div class="field"><label>Company <small>可选</small></label><input class="input" name="companyName" maxlength="160" value="${esc(company)}" ${d.type==='new-company-note' && state.companyName ? 'readonly':''}><div class="field-hint">填写后会自动聚合到 Company Watch。</div></div><label class="check-row"><input type="checkbox" name="pinned" ${n?.pinned?'checked':''}> 置顶</label><div class="source-banner"><span>保存到</span><b>${esc(state.notesMode)}</b><span>${state.notesMode==='Memos'?'不会自动复制到 Local。':'不会自动上传到 Memos。'}</span></div>${d.type==='edit-note'?`<button type="button" class="btn danger" data-delete-note="${esc(n.id)}">删除这条 Note</button>`:''}`; }
   if (d.type === 'new-member' || d.type === 'edit-member') { const m=state.data.team.find((x)=>x.id===d.id); title=d.type==='new-member'?'添加成员':'编辑成员'; submit='保存成员'; body=`<div class="field"><label>Name <span>*</span></label><input class="input" name="name" required value="${esc(m?.name||'')}"></div><div class="field"><label>Email <span>*</span></label><input class="input" name="email" type="email" required value="${esc(m?.email||'')}"></div>`; }
   return `<div class="drawer-backdrop"><form class="drawer" id="drawer-form"><header class="drawer-head"><h3>${title}</h3><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></header><div class="drawer-body">${body}</div><footer class="drawer-foot"><button type="button" class="btn" data-close>取消</button><button class="btn primary" type="submit">${submit}</button></footer></form></div>`;
 }
@@ -146,6 +222,9 @@ function renderDrawer() {
 function render() {
   if (state.route === 'tasks') app.innerHTML = taskList();
   if (state.route === 'task-detail') app.innerHTML = taskDetail();
+  if (state.route === 'notes') app.innerHTML = notesPage();
+  if (state.route === 'company-watch') app.innerHTML = companyWatchPage();
+  if (state.route === 'company-watch-detail') app.innerHTML = companyWatchDetail();
   if (state.route === 'companies') app.innerHTML = companyList();
   if (state.route === 'company-detail') app.innerHTML = companyDetail();
   if (state.route === 'settings') app.innerHTML = settingsPage();
@@ -182,6 +261,12 @@ async function onSubmit(form) {
   if (d.type === 'new-company') { const name=fd.get('name').trim(); if(state.data.companies.some((c)=>c.name.toLowerCase()===name.toLowerCase())) { toast('该公司已存在','error'); return; } await storage.put('companies',{id:uid('company'),name,createdAt:timestamp}); state.drawer=null; await refresh('公司已添加'); }
   if (d.type === 'new-comment') { await storage.put('comments',{id:uid('comment'),companyId:state.companyId,content:fd.get('content').trim(),createdAt:timestamp,updatedAt:timestamp}); state.drawer=null; await refresh('留言已保存'); }
   if (d.type === 'edit-comment') { const c=state.data.comments.find((x)=>x.id===d.id); await storage.put('comments',{...c,content:fd.get('content').trim(),updatedAt:timestamp}); state.drawer=null; await refresh('留言已更新'); }
+  if (['new-note','new-company-note','edit-note'].includes(d.type)) {
+    const adapter=currentNotesAdapter(); const old=state.notes.find((n)=>n.id===d.id);
+    const note={ id:old?.id||uid('note'), source:state.notesMode, title:fd.get('title').trim(), content:fd.get('content').trim(), companyName:fd.get('companyName').trim(), pinned:fd.get('pinned')==='on', createdAt:old?.createdAt||timestamp, updatedAt:timestamp };
+    if (old) await adapter.update(note); else await adapter.create(note);
+    state.drawer=null; await refresh(state.notesMode === 'Memos' ? 'Note 已保存到 Memos' : 'Note 已保存到 Local');
+  }
   if (d.type === 'new-member' || d.type === 'edit-member') { const old=state.data.team.find((x)=>x.id===d.id); const m={id:old?.id||uid('member'),name:fd.get('name').trim(),email:fd.get('email').trim(),createdAt:old?.createdAt||timestamp,updatedAt:timestamp}; await storage.put('team',m); state.drawer=null; await refresh('成员已保存；历史名称保持不变'); }
 }
 
@@ -196,23 +281,68 @@ async function importData(file) {
   catch(error) { toast(`导入失败：${error.message}`,'error'); }
 }
 
+function memosDraft() {
+  return { serverUrl:document.querySelector('#memos-url')?.value.trim()||'', apiBase:document.querySelector('#memos-api')?.value||'auto', token:document.querySelector('#memos-token')?.value||notesCredentials.getToken(), remember:Boolean(document.querySelector('#remember-token')?.checked) };
+}
+
+async function testMemosConnection() {
+  const status=document.querySelector('#memos-test-status');
+  try {
+    const draft=memosDraft(); if(!draft.token) throw new Error('请输入 Access Token');
+    if(status) status.textContent='正在连接…';
+    const adapter=new MemosNotesAdapter(draft); const result=await adapter.testConnection();
+    state.memosTest={...draft,requestedApi:draft.apiBase,serverUrl:adapter.serverUrl,apiBase:result.apiBase};
+    if(status) status.textContent=`连接测试成功：${result.apiBase}。点击 Connect 后才会切换数据源。`;
+    toast('Memos 连接测试成功；尚未切换数据源');
+  } catch(error) { state.memosTest=null; if(status) status.textContent=error.message; toast(error.message,'error'); }
+}
+
+async function connectMemos() {
+  if(!state.memosTest) { toast('请先完成 Test Connection','error'); return; }
+  const draft=memosDraft(); const normalized=MemosNotesAdapter.normalizeServer(draft.serverUrl);
+  if(normalized!==state.memosTest.serverUrl||draft.token!==state.memosTest.token||draft.remember!==state.memosTest.remember||draft.apiBase!==state.memosTest.requestedApi){state.memosTest=null;toast('连接参数已变化，请重新执行 Test Connection','error');return;}
+  notesCredentials.saveConnection(state.memosTest); state.memosTest=null; state.search=''; await refresh('Notes 已切换到 Memos；Local 数据未改动');
+}
+
+async function migrateLegacyWall() {
+  const local=new LocalNotesAdapter(storage); const existing=new Set((await local.list()).map((n)=>n.id)); let added=0;
+  for(const comment of state.data.comments) {
+    const id=`note_legacy_${comment.id}`; if(existing.has(id)) continue;
+    const company=state.data.companies.find((c)=>c.id===comment.companyId);
+    await local.create({id,source:'Local',legacySource:{store:'comments',id:comment.id},title:'',content:comment.content,companyName:company?.name||'',pinned:false,createdAt:comment.createdAt,updatedAt:comment.updatedAt||comment.createdAt}); added++;
+  }
+  await refresh(`兼容复制完成：新增 ${added} 条 Local Notes；旧版数据保持不变`);
+}
+
 app.addEventListener('click', async (e) => {
+  try {
   const nav=e.target.closest('[data-nav]'); if(nav){state.route=nav.dataset.nav; state.search=''; state.drawer=null; render(); return;}
-  const open=e.target.closest('[data-open]'); if(open){openDrawer(open.dataset.open); return;}
+  const open=e.target.closest('[data-open]'); if(open){if(open.dataset.open==='new-company-note'&&state.route==='company-watch')state.companyName='';openDrawer(open.dataset.open); return;}
   if(e.target.closest('[data-close]') || (e.target.classList.contains('drawer-backdrop'))){closeDrawer();return;}
+  const editNote=e.target.closest('[data-edit-note]'); if(editNote){openDrawer('edit-note',editNote.dataset.editNote);return;}
+  const watchCompany=e.target.closest('[data-watch-company]'); if(watchCompany){state.companyName=watchCompany.dataset.watchCompany;state.route='company-watch-detail';render();return;}
+  const note=e.target.closest('[data-note]'); if(note){openDrawer('edit-note',note.dataset.note);return;}
   const task=e.target.closest('[data-task]'); if(task){state.taskId=task.dataset.task;state.route='task-detail';render();return;}
   const company=e.target.closest('[data-company]'); if(company){state.companyId=company.dataset.company;state.route='company-detail';render();return;}
   const editComment=e.target.closest('[data-edit-comment]'); if(editComment){openDrawer('edit-comment',editComment.dataset.editComment);return;}
   const editMember=e.target.closest('[data-edit-member]'); if(editMember){openDrawer('edit-member',editMember.dataset.editMember);return;}
   if(e.target.id==='export-data'){await exportData();return;}
+  if(e.target.closest('[data-test-memos]')){await testMemosConnection();return;}
+  if(e.target.closest('[data-connect-memos]')){await connectMemos();return;}
+  if(e.target.closest('[data-disconnect-memos]')){notesCredentials.useLocal();state.search='';await refresh('Notes 已切换回 Local；Memos 数据未改动');return;}
+  if(e.target.closest('[data-clear-memos]') && confirm('确定清除已保存的 Memos 配置和令牌吗？远端数据不会被删除。')){notesCredentials.clear();state.memosTest=null;await refresh('Memos 凭据已清除，Notes 使用 Local');return;}
+  if(e.target.closest('[data-open-legacy-wall]')){state.route='companies';state.search='';render();return;}
+  if(e.target.closest('[data-migrate-legacy]')){await migrateLegacyWall();return;}
+  const deleteNote=e.target.closest('[data-delete-note]'); if(deleteNote && confirm(`确定从 ${state.notesMode} 删除这条 Note 吗？此操作不会影响另一数据源。`)){await currentNotesAdapter().delete(deleteNote.dataset.deleteNote);state.drawer=null;await refresh(`Note 已从 ${state.notesMode} 删除`);return;}
   const deleteComment=e.target.closest('[data-delete-comment]'); if(deleteComment && confirm('确定删除这条留言吗？此操作不可撤销。')){await storage.delete('comments',deleteComment.dataset.deleteComment);await refresh('留言已删除');return;}
   const deleteMember=e.target.closest('[data-delete-member]'); if(deleteMember && confirm('确定删除该成员吗？历史任务与记录中的姓名会保留。')){await storage.delete('team',deleteMember.dataset.deleteMember);await refresh('成员已删除；历史名称已保留');return;}
   const deleteTask=e.target.closest('[data-delete-task]'); if(deleteTask){const ac=state.data.activity.filter((x)=>x.taskId===deleteTask.dataset.deleteTask).length;const hc=state.data.handoffs.filter((x)=>x.taskId===deleteTask.dataset.deleteTask).length;if(confirm(`确定删除该任务吗？将同时删除 ${ac} 条活动和 ${hc} 条交接记录。`)){await storage.delete('tasks',deleteTask.dataset.deleteTask);await storage.deleteWhere('activity',(x)=>x.taskId===deleteTask.dataset.deleteTask);await storage.deleteWhere('handoffs',(x)=>x.taskId===deleteTask.dataset.deleteTask);state.route='tasks';await refresh(`任务及关联的 ${ac} 条活动、${hc} 条交接记录已删除`);}return;}
   const deleteCompany=e.target.closest('[data-delete-company]'); if(deleteCompany){const cc=state.data.comments.filter((x)=>x.companyId===deleteCompany.dataset.deleteCompany).length;if(confirm(`确定删除该公司吗？将同时删除 ${cc} 条关联留言。`)){await storage.delete('companies',deleteCompany.dataset.deleteCompany);await storage.deleteWhere('comments',(x)=>x.companyId===deleteCompany.dataset.deleteCompany);state.route='companies';await refresh(`公司及 ${cc} 条关联留言已删除`);}return;}
+  } catch(error) { toast(error.message || '操作失败','error'); }
 });
 
-app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'){e.preventDefault();await onSubmit(e.target);} });
-app.addEventListener('input', (e) => { if(e.target.id==='task-search' || e.target.id==='company-search'){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);} });
+app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'){e.preventDefault();try{await onSubmit(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
+app.addEventListener('input', (e) => { if(['task-search','company-search','note-search','company-watch-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);} });
 app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='update-status'){document.querySelector('#blocked-wrap').hidden=e.target.value!=='Blocked';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});
 

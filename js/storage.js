@@ -1,7 +1,7 @@
 (() => {
 const DB_NAME = 'taskflow-workspace-v1';
-const DB_VERSION = 1;
-const STORES = ['tasks', 'activity', 'handoffs', 'team', 'companies', 'comments'];
+const DB_VERSION = 2;
+const STORES = ['tasks', 'activity', 'handoffs', 'team', 'companies', 'comments', 'notes'];
 
 const clone = (value) => structuredClone(value);
 
@@ -10,6 +10,7 @@ class LocalStorageAdapter {
 
   async init() {
     if (!this.dbPromise) {
+      if (!('indexedDB' in window)) throw new Error('当前浏览器或 file:// 环境不支持 IndexedDB。本应用不会在无法持久化时继续静默保存，请改用最新版 Chrome / Edge 或受信任的静态部署。');
       this.dbPromise = new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
@@ -69,14 +70,15 @@ class LocalStorageAdapter {
 
   async exportData() {
     const entries = await Promise.all(STORES.map(async (name) => [name, await this.all(name)]));
-    return { schemaVersion: 1, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
+    return { schemaVersion: 2, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
   }
 
   validateImport(payload) {
-    if (!payload || payload.schemaVersion !== 1 || !payload.data || typeof payload.data !== 'object') {
+    if (!payload || ![1, 2].includes(payload.schemaVersion) || !payload.data || typeof payload.data !== 'object') {
       throw new Error('备份文件版本或结构无效');
     }
     for (const name of STORES) {
+      if (name === 'notes' && payload.schemaVersion === 1 && payload.data[name] == null) continue;
       if (!Array.isArray(payload.data[name])) throw new Error(`备份缺少有效的 ${name} 集合`);
       if (payload.data[name].some((item) => !item || typeof item !== 'object' || typeof item.id !== 'string')) {
         throw new Error(`${name} 中存在无效记录`);
@@ -89,10 +91,11 @@ class LocalStorageAdapter {
     this.validateImport(payload);
     const report = {};
     for (const name of STORES) {
+      const incoming = payload.data[name] || [];
       const existing = new Set((await this.all(name)).map((item) => item.id));
-      const additions = payload.data[name].filter((item) => !existing.has(item.id));
+      const additions = incoming.filter((item) => !existing.has(item.id));
       if (additions.length) await this.putMany(name, additions);
-      report[name] = { added: additions.length, skipped: payload.data[name].length - additions.length };
+      report[name] = { added: additions.length, skipped: incoming.length - additions.length };
     }
     return report;
   }
