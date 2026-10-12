@@ -1,7 +1,7 @@
 (() => {
 const DB_NAME = 'taskflow-workspace-v1';
-const DB_VERSION = 2;
-const STORES = ['tasks', 'activity', 'handoffs', 'team', 'companies', 'comments', 'notes'];
+const DB_VERSION = 3;
+const STORES = ['tasks', 'activity', 'handoffs', 'team', 'companies', 'comments', 'notes', 'radar'];
 
 const clone = (value) => structuredClone(value);
 
@@ -70,15 +70,15 @@ class LocalStorageAdapter {
 
   async exportData() {
     const entries = await Promise.all(STORES.map(async (name) => [name, await this.all(name)]));
-    return { schemaVersion: 2, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
+    return { schemaVersion: 3, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
   }
 
   validateImport(payload) {
-    if (!payload || ![1, 2].includes(payload.schemaVersion) || !payload.data || typeof payload.data !== 'object') {
+    if (!payload || ![1, 2, 3].includes(payload.schemaVersion) || !payload.data || typeof payload.data !== 'object') {
       throw new Error('备份文件版本或结构无效');
     }
     for (const name of STORES) {
-      if (name === 'notes' && payload.schemaVersion === 1 && payload.data[name] == null) continue;
+      if ((name === 'notes' && payload.schemaVersion === 1 && payload.data[name] == null) || (name === 'radar' && payload.schemaVersion < 3 && payload.data[name] == null)) continue;
       if (!Array.isArray(payload.data[name])) throw new Error(`备份缺少有效的 ${name} 集合`);
       if (payload.data[name].some((item) => !item || typeof item !== 'object' || typeof item.id !== 'string')) {
         throw new Error(`${name} 中存在无效记录`);

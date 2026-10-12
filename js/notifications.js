@@ -15,7 +15,7 @@ function formatTaskNotification(event, task, note = '') {
   return [
     `[${event}] ${task.title}`,
     `要求：${task.requirement}`,
-    `当前进度：${task.currentSummary || '暂无'}`,
+    `备注：${task.remark || '暂无'}`,
     `下一步：${task.next || '暂无'}`,
     note ? `交接备注：${note}` : '',
   ].filter(Boolean).join('\n');

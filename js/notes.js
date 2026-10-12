@@ -93,7 +93,7 @@
     }
 
     encode(note) {
-      const metadata = toBase64({ title: note.title || '', companyName: note.companyName || '', pinned: Boolean(note.pinned) });
+      const metadata = toBase64({ title: note.title || '', category: note.category || (note.companyName ? 'Company' : 'Personal') });
       return `${MARKER}${metadata} -->\n${note.content}`;
     }
 
@@ -103,7 +103,7 @@
       if (!match) return null;
       try {
         const meta = fromBase64(match[1]);
-        return { id: memo.name, remoteId: memo.name, source: 'Memos', title: meta.title || '', companyName: meta.companyName || '', pinned: Boolean(meta.pinned), content: content.slice(match[0].length), createdAt: timeValue(memo.createTime || memo.create_time), updatedAt: timeValue(memo.updateTime || memo.update_time) };
+        return { id: memo.name, remoteId: memo.name, source: 'Memos', title: meta.title || '', category: meta.category || (meta.companyName ? 'Company' : 'Personal'), content: content.slice(match[0].length), createdAt: timeValue(memo.createTime || memo.create_time), updatedAt: timeValue(memo.updateTime || memo.update_time) };
       } catch { return null; }
     }
 
