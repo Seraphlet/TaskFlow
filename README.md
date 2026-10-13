@@ -23,16 +23,17 @@ js/app.js               应用外壳、四个核心模块及交互
 js/storage.js           IndexedDB Local Adapter 与 Remote Adapter 边界
 js/notifications.js     通知事件、纯文本格式与未配置适配器
 js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版本兼容
-js/radar.js             Radar 本地探索批次内容与批次生成边界
+js/radar.js             Radar Item 模型、演示 Provider 与生成边界
 ```
 
 ## 数据与兼容性
 
-- Tasks、Team、Activity、Handoffs、Local Notes、Radar 当前批次与旧版公司墙数据保存在当前浏览器的 IndexedDB 中。
+- Tasks、Team、Activity、Handoffs、Local Notes、Radar Profiles / Batches 与旧版公司墙数据保存在当前浏览器的 IndexedDB 中。
 - Categories 直接聚合 Note 的 `category` 字段，不维护独立分类数据库。旧 Note 中存在 `companyName` 时会兼容显示为 `Company`。
-- Radar 首次打开建立探索批次，之后持续显示；仅点击 `Explore New` 才写入下一批。
+- Radar 的 Profile 与 Batch 分开保存。每个 Profile 恢复自己的当前批次；仅点击 `Explore New` 才向演示 Provider 请求下一批。
+- 内置 Provider 仍只有有限的演示 Radar Items。它不会循环三批内容，也不会把不匹配用户领域的固定内容伪装成生成结果；候选不足会在页面明确提示。
 - 原 `companies` / `comments` 数据仍保留，可在 Settings 中显式复制到 `Company` 分类的 Local Notes；迁移不删除旧数据并按固定 ID 去重。
-- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1/V2 备份仍可导入。Memos 远端数据和访问令牌不会进入导出文件。
+- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1/V2/V3 备份仍可导入。Memos 远端数据和访问令牌不会进入导出文件。
 - `file://` 存储可能被不同浏览器或文件路径隔离。启动时若 IndexedDB 不可用，应用会明确报错而不是静默丢失数据。
 
 ## Memos（可选）

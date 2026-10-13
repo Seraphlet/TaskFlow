@@ -1,17 +1,19 @@
 const { LocalStorageAdapter, STORES } = window.TaskFlowStorage;
 const { NoopNotificationAdapter, NotificationEvents, formatTaskNotification } = window.TaskFlowNotifications;
 const { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore } = window.TaskFlowNotes;
-const { batch: radarBatch } = window.TaskFlowRadar;
+const { DemoRadarProvider, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex } = window.TaskFlowRadar;
 
 const storage = new LocalStorageAdapter();
 const notifications = new NoopNotificationAdapter();
 const notesCredentials = new NotesCredentialStore();
+const radarProvider = new DemoRadarProvider();
 const app = document.querySelector('#app');
 const STATUS = ['Todo', 'Doing', 'Blocked', 'Done'];
 const STATUS_LABELS = { Todo: '待办', Doing: '进行中', Blocked: '已阻塞', Done: '已完成' };
 const FIELD_LABELS = { status: '任务状态', remark: '备注', next: '下一步行动', blockedReason: '阻塞说明', owner: '负责人' };
 const CATEGORIES = ['AI Engineering', 'Company', 'Learning', 'Project', 'Personal'];
-const state = { route: 'tasks', taskId: null, noteId: null, noteDraft: null, selectedCategory: 'All', companyId: null, search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radar: null };
+const RADAR_ACTIVE_KEY = 'taskflow-radar-active-profile-v1';
+const state = { route: 'tasks', taskId: null, noteId: null, noteDraft: null, selectedCategory: 'All', companyId: null, search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarProfileId: '', radarMessage: '' };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
@@ -23,12 +25,57 @@ async function loadData() {
   const entries = await Promise.all(STORES.map(async (name) => [name, await storage.all(name)]));
   state.data = Object.fromEntries(entries);
   await loadNotes();
-  state.radar = state.data.radar.find((item) => item.id === 'current') || null;
-  if (!state.radar) {
-    state.radar = { id: 'current', index: 0, createdAt: now(), items: radarBatch(0) };
-    await storage.put('radar', state.radar);
-    state.data.radar = [state.radar];
+  await loadRadar();
+}
+
+function radarBatchId(profileId) { return `batch_${profileId}`; }
+function activeRadarProfile() { return state.radarProfiles.find((profile) => profile.id === state.radarProfileId) || state.radarProfiles[0]; }
+function activeRadarBatch() { return state.radarBatches.find((batch) => batch.profileId === state.radarProfileId); }
+
+function radarShortages(items) {
+  return Object.fromEntries(Object.entries(QUOTAS).map(([section, quota]) => [section, Math.max(0, quota - items.filter((item) => item.section === section).length)]));
+}
+
+async function createRadarBatch(profile, sequence = 1) {
+  const result = await radarProvider.getNextBatch(profile, []);
+  const timestamp = now();
+  return { id:radarBatchId(profile.id), profileId:profile.id, sequence, items:result.items, usedItemIds:result.items.map((item)=>item.id), shortages:result.shortages, provider:result.provider, exhausted:result.exhausted, createdAt:timestamp, updatedAt:timestamp };
+}
+
+async function loadRadar() {
+  const timestamp = now();
+  state.radarProfiles = [...state.data.radarProfiles];
+  state.radarBatches = [...state.data.radarBatches];
+  let defaultProfile = state.radarProfiles.find((profile) => profile.id === DEFAULT_PROFILE.id);
+  if (!defaultProfile) {
+    defaultProfile = { ...structuredClone(DEFAULT_PROFILE), createdAt:timestamp, updatedAt:timestamp };
+    await storage.put('radarProfiles', defaultProfile);
+    state.radarProfiles.push(defaultProfile);
   }
+  state.radarProfiles.sort((a,b) => Number(b.isDefault)-Number(a.isDefault) || String(a.createdAt||'').localeCompare(String(b.createdAt||'')) || a.name.localeCompare(b.name,'zh-CN'));
+  if (!state.radarBatches.some((batch) => batch.profileId === defaultProfile.id)) {
+    const legacy = state.data.radar.find((item) => item.id === 'current');
+    let batch;
+    if (legacy?.items?.length) {
+      const items = normalizeLegacyItems(legacy.items);
+      batch = { id:radarBatchId(defaultProfile.id), profileId:defaultProfile.id, sequence:Number(legacy.index || 0) + 1, items, usedItemIds:usedIdsThroughLegacyIndex(legacy.index), shortages:radarShortages(items), provider:'Demo', exhausted:false, createdAt:legacy.createdAt || timestamp, updatedAt:timestamp };
+    } else batch = await createRadarBatch(defaultProfile);
+    await storage.put('radarBatches', batch); state.radarBatches.push(batch);
+  }
+  for (const profile of state.radarProfiles) {
+    if (state.radarBatches.some((batch) => batch.profileId === profile.id)) continue;
+    const batch = await createRadarBatch(profile);
+    await storage.put('radarBatches', batch); state.radarBatches.push(batch);
+  }
+  let savedProfileId = '';
+  try { savedProfileId = localStorage.getItem(RADAR_ACTIVE_KEY) || ''; } catch {}
+  state.radarProfileId = state.radarProfiles.some((profile) => profile.id === savedProfileId) ? savedProfileId : defaultProfile.id;
+}
+
+function selectRadarProfile(profileId) {
+  if (!state.radarProfiles.some((profile) => profile.id === profileId)) return;
+  state.radarProfileId = profileId; state.radarMessage = '';
+  try { localStorage.setItem(RADAR_ACTIVE_KEY, profileId); } catch {}
 }
 
 function currentNotesAdapter() {
@@ -171,12 +218,23 @@ function categoriesPage() {
 }
 
 function radarCard(item) {
-  return `<article class="card radar-card"><div class="radar-card-top"><span class="category-chip">${esc(item.domain)}</span><span class="subtle">${esc(item.sourceName)}</span></div><h4>${esc(item.title)}</h4><p>${esc(item.explanation)}</p><div class="radar-why"><b>为什么值得关注</b><span>${esc(item.why)}</span></div><footer><a class="btn small" href="${esc(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open ↗</a><button class="btn small primary" data-save-radar="${esc(item.id)}">Save Notes</button></footer></article>`;
+  return `<article class="card radar-card"><div class="radar-card-top"><span class="category-chip">${esc(item.domain)}</span><span class="subtle">演示内容 · ${esc(item.sourceName)}</span></div><h4>${esc(item.title)}</h4><p>${esc(item.explanation)}</p><div class="radar-why"><b>为什么值得关注</b><span>${esc(item.why)}</span></div><footer><a class="btn small" href="${esc(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open ↗</a><button class="btn small primary" data-save-radar="${esc(item.id)}">Save Notes</button></footer></article>`;
 }
 
 function radarPage() {
   const sections = ['Core Domain', 'Adjacent Fields', 'Unknown Window'];
-  return shell(`<section class="page radar-page"><div class="page-head"><div><h3>Current Exploration</h3><p>当前批次会持续保留，直到你主动探索下一批。</p></div><button class="btn primary" data-explore-new>Explore New</button></div><div class="radar-batch-meta"><span>探索批次 ${Number(state.radar?.index || 0) + 1}</span><span>生成于 ${dateText(state.radar?.createdAt || now())}</span><span>共 ${state.radar?.items?.length || 0} 条</span></div>${sections.map((section) => { const items=(state.radar?.items || []).filter((item) => item.section === section); return `<section class="radar-section"><div class="section-title"><h4>${section}</h4><span>${items.length}</span></div><div class="radar-grid">${items.map(radarCard).join('')}</div></section>`; }).join('')}</section>`, 'Radar', '认知探索窗口 · 非随机信息流');
+  const profile = activeRadarProfile(); const batch = activeRadarBatch();
+  const items = batch?.items || [];
+  const shortageParts = sections.filter((section) => batch?.shortages?.[section] > 0).map((section) => `${section} 缺 ${batch.shortages[section]} 条`);
+  const limitation = state.radarMessage || (batch?.exhausted ? '没有新的匹配演示内容，当前批次保持不变。修改方向配置后可再次尝试；真实信息提供方尚未接入。' : shortageParts.length ? `当前演示候选不足：${shortageParts.join('，')}。未接入真实信息提供方。` : '当前批次来自内置演示候选库，不是根据用户兴趣实时生成。');
+  return shell(`<section class="page radar-page">
+    <div class="radar-profile-bar card"><label>探索方向<select class="select" id="radar-profile-select">${state.radarProfiles.map((item)=>`<option value="${esc(item.id)}" ${item.id===profile?.id?'selected':''}>${esc(item.name)}</option>`).join('')}</select></label><div class="radar-profile-actions"><button class="btn small" data-open="edit-radar-profile">编辑</button>${profile?.isDefault?'':`<button class="btn small danger" data-delete-radar-profile="${esc(profile?.id)}">删除</button>`}<button class="btn small primary" data-open="new-radar-profile">＋ 新建方向</button></div></div>
+    <div class="radar-profile-scope"><div><b>核心领域</b>${(profile?.coreDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><div><b>相邻领域</b>${(profile?.adjacentDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><p>Unknown Window 保持开放，不受以上领域限制。</p></div>
+    <div class="page-head"><div><h3>Current Exploration</h3><p>修改方向不会清除当前批次；仅 Explore New 使用新配置。</p></div><button class="btn primary" data-explore-new>Explore New</button></div>
+    <div class="radar-demo-notice ${shortageParts.length || batch?.exhausted ? 'warning' : ''}"><b>Demo Provider</b><span>${esc(limitation)}</span></div>
+    <div class="radar-batch-meta"><span>探索批次 ${Number(batch?.sequence || 1)}</span><span>生成于 ${dateText(batch?.createdAt || now())}</span><span>共 ${items.length} 条</span></div>
+    ${sections.map((section) => { const sectionItems=items.filter((item) => item.section === section); return `<section class="radar-section"><div class="section-title"><h4>${section}</h4><span>${sectionItems.length} / ${QUOTAS[section]}</span></div>${sectionItems.length?`<div class="radar-grid">${sectionItems.map(radarCard).join('')}</div>`:`<div class="radar-empty">暂无匹配的演示内容</div>`}</section>`; }).join('')}
+  </section>`, 'Radar', `${state.radarProfiles.length} 个探索方向 · 当前为 ${profile?.name || '未选择'}`);
 }
 
 function companyList() {
@@ -209,7 +267,7 @@ function settingsPage() {
   const legacyCount = state.data.comments.length;
   return shell(`<section class="page"><div class="page-head"><div><h3>Settings</h3><p>存储状态、团队和备份。</p></div></div>
     <div class="settings-grid"><article class="card setting-card"><h4>TaskFlow 服务状态</h4><p class="subtle">任务存储与 Notes 存储相互独立。</p><div class="setting-row"><span>Task Storage</span><span class="setting-value ready">Local</span></div><div class="setting-row"><span>Remote Adapter</span><span class="setting-value muted">Not Configured</span></div><div class="setting-row"><span>Email Notification</span><span class="setting-value muted">Not Configured</span></div></article>
-      <article class="card setting-card"><h4>数据备份</h4><p class="subtle">覆盖本地 Tasks、Notes、Radar 批次、Team、旧版公司墙及历史记录。导入采用合并策略，相同 ID 保留已有记录；Memos 远端笔记和访问令牌不会导出。</p><div class="import-box"><button class="btn dark" id="export-data">导出本地 JSON</button><label class="btn" for="import-data">导入 JSON</label><input class="sr-only" id="import-data" type="file" accept="application/json,.json"></div><div class="warning" style="margin-top:18px">浏览器存储不是云端备份。file:// 数据可能按浏览器与文件路径隔离，清除站点数据仍会导致丢失。</div></article>
+      <article class="card setting-card"><h4>数据备份</h4><p class="subtle">覆盖本地 Tasks、Notes、Radar Profiles / Batches、Team、旧版公司墙及历史记录。导入采用合并策略，相同 ID 保留已有记录；Memos 远端笔记和访问令牌不会导出。</p><div class="import-box"><button class="btn dark" id="export-data">导出本地 JSON</button><label class="btn" for="import-data">导入 JSON</label><input class="sr-only" id="import-data" type="file" accept="application/json,.json"></div><div class="warning" style="margin-top:18px">浏览器存储不是云端备份。file:// 数据可能按浏览器与文件路径隔离，清除站点数据仍会导致丢失。</div></article>
       <article class="card setting-card notes-storage-card"><h4>Notes Storage</h4><div class="setting-row"><span>当前模式</span><span class="setting-value ${config.mode === 'Memos' ? 'remote' : 'ready'}">${esc(config.mode || 'Local')}</span></div>
         <div class="field"><label>Memos Server URL</label><input class="input" id="memos-url" type="url" placeholder="https://memos.example.com" value="${esc(config.serverUrl || '')}"><div class="field-hint">可粘贴设置页链接；连接时会自动提取站点根地址，不会把页面路径或 #fragment 当成 API 路径。</div></div>
         <div class="field"><label>API 版本</label><select class="select" id="memos-api"><option value="auto">自动检测</option><option value="/api" ${config.apiBase === '/api' ? 'selected':''}>26.10 / Latest（/api）</option><option value="/api/v1" ${config.apiBase === '/api/v1' ? 'selected':''}>0.30–0.31（/api/v1）</option></select></div>
@@ -221,7 +279,7 @@ function settingsPage() {
       </article>
       ${teamSettings()}
       <article class="card setting-card"><h4>旧版公司墙兼容</h4><p class="subtle">原 companies / comments 数据仍完整保留。可复制为 Local Notes；旧数据不会被删除，重复迁移会按固定 ID 跳过。</p><div class="setting-row"><span>旧版留言</span><b>${legacyCount} 条</b></div><div class="import-box"><button class="btn" data-open-legacy-wall>打开旧版公司墙</button><button class="btn" data-migrate-legacy ${legacyCount ? '' : 'disabled'}>复制到 Local Notes</button></div></article>
-      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">TaskFlow 继续通过既有 Storage Adapter 访问本地数据，Remote Adapter 预留未删除。Notes 使用独立的 LocalNotesAdapter / MemosNotesAdapter。通知接口仍仅定义 TaskCreated 与 TaskHandedOff，未配置时不模拟发送。</p></article>
+      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">TaskFlow 继续通过既有 Storage Adapter 访问本地数据，Remote Adapter 预留未删除。Notes 使用独立的 LocalNotesAdapter / MemosNotesAdapter；Radar 通过 DemoRadarProvider 获取候选，未来可替换为真实信息提供方。通知接口仍仅定义 TaskCreated 与 TaskHandedOff，未配置时不模拟发送。</p></article>
     </div></section>`, 'Settings', 'TaskFlow 与 Notes 存储独立配置');
 }
 
@@ -249,6 +307,7 @@ function renderDrawer() {
   if (d.type === 'handoff') { const t=state.data.tasks.find((x)=>x.id===state.taskId); const available=state.data.team.some((m)=>!isCurrentOwner(t,m)); title='交接任务'; submit='确认交接'; body=`<div class="handoff-flow"><div class="active"><b>1</b><span>当前负责人</span></div><i>↓</i><div><b>2</b><span>接手人</span></div><i>↓</i><div><b>3</b><span>确认交接</span></div></div><div class="field"><label>当前负责人</label><input class="input" value="${esc(t.ownerName||'未分配')}" disabled></div><div class="field"><label>接手人 <span>*</span></label><select class="select" name="toId" id="handoff-to" required ${available?'':'disabled'}>${handoffMemberOptions(t)}</select>${available?'':'<div class="field-hint error-text">Team 中没有其他可接手的成员，请先到 Settings 添加成员。</div>'}</div><div class="field"><label>交接说明</label><textarea class="textarea" name="note" placeholder="交接背景、注意事项或待处理内容"></textarea></div><div class="handoff-confirm" id="handoff-confirm">请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。</div>`; }
   if (d.type === 'new-company') { title='添加公司'; submit='添加'; body=`<div class="field"><label>公司名称 <span>*</span></label><input class="input" name="name" required maxlength="120"></div>`; }
   if (d.type === 'new-comment' || d.type === 'edit-comment') { const c=state.data.comments.find((x)=>x.id===d.id); title=d.type==='new-comment'?'新增留言':'编辑留言'; submit=d.type==='new-comment'?'保存留言':'保存修改'; body=`<div class="field"><label>Content <span>*</span></label><textarea class="textarea" name="content" required placeholder="以个人记录的方式写下你的观察">${esc(c?.content||'')}</textarea><div class="field-hint">留言只保存在本地，不代表平台认定的事实。</div></div>`; }
+  if (d.type === 'new-radar-profile' || d.type === 'edit-radar-profile') { const profile=d.type==='edit-radar-profile'?(state.radarProfiles.find((item)=>item.id===d.id)||activeRadarProfile()):null; const editing=Boolean(profile); title=editing?'编辑探索方向':'新建探索方向'; submit=editing?'保存配置':'创建方向'; body=`<div class="field"><label>方向名称 <span>*</span></label><input class="input" name="name" required maxlength="60" value="${esc(profile?.name||'')}" ${profile?.isDefault?'readonly':''}></div><div class="field"><label>核心领域</label><textarea class="textarea" name="coreDomains" placeholder="每行填写一个领域">${esc((profile?.coreDomains||[]).join('\n'))}</textarea><div class="field-hint">演示提供方目前支持：AI Engineering、Personal Productivity、Knowledge Management。</div></div><div class="field"><label>相邻领域</label><textarea class="textarea" name="adjacentDomains" placeholder="每行填写一个领域">${esc((profile?.adjacentDomains||[]).join('\n'))}</textarea><div class="field-hint">演示提供方目前支持：Learning Science、Behavioral Science、Product Design。</div></div><div class="warning">修改配置不会清除当前批次；下一次 Explore New 才会按新配置查找演示候选。Unknown Window 始终保持开放。</div>`; }
   if (d.type === 'new-member' || d.type === 'edit-member') { const m=state.data.team.find((x)=>x.id===d.id); title=d.type==='new-member'?'添加成员':'编辑成员'; submit='保存成员'; body=`<div class="field"><label>Name <span>*</span></label><input class="input" name="name" required value="${esc(m?.name||'')}"></div><div class="field"><label>Email <span>*</span></label><input class="input" name="email" type="email" required value="${esc(m?.email||'')}"></div>`; }
   return `<div class="drawer-backdrop"><form class="drawer" id="drawer-form"><header class="drawer-head"><h3>${title}</h3><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></header><div class="drawer-body">${body}</div><footer class="drawer-foot"><button type="button" class="btn" data-close>取消</button><button class="btn primary" type="submit">${submit}</button></footer></form></div>`;
 }
@@ -300,6 +359,17 @@ async function onSubmit(form) {
   if (d.type === 'new-company') { const name=fd.get('name').trim(); if(state.data.companies.some((c)=>c.name.toLowerCase()===name.toLowerCase())) { toast('该公司已存在','error'); return; } await storage.put('companies',{id:uid('company'),name,createdAt:timestamp}); state.drawer=null; await refresh('公司已添加'); }
   if (d.type === 'new-comment') { await storage.put('comments',{id:uid('comment'),companyId:state.companyId,content:fd.get('content').trim(),createdAt:timestamp,updatedAt:timestamp}); state.drawer=null; await refresh('留言已保存'); }
   if (d.type === 'edit-comment') { const c=state.data.comments.find((x)=>x.id===d.id); await storage.put('comments',{...c,content:fd.get('content').trim(),updatedAt:timestamp}); state.drawer=null; await refresh('留言已更新'); }
+  if (d.type === 'new-radar-profile' || d.type === 'edit-radar-profile') {
+    const old=d.type==='edit-radar-profile'?(state.radarProfiles.find((item)=>item.id===d.id)||activeRadarProfile()):null;
+    const name=fd.get('name').trim();
+    if (state.radarProfiles.some((item)=>item.id!==old?.id&&item.name.toLocaleLowerCase()===name.toLocaleLowerCase())) { toast('已存在同名探索方向','error'); return; }
+    const parseDomains=(value)=>[...new Set(String(value||'').split(/[\n,，]/).map((item)=>item.trim()).filter(Boolean))];
+    const profile={id:old?.id||uid('profile'),name:old?.isDefault?old.name:name,coreDomains:parseDomains(fd.get('coreDomains')),adjacentDomains:parseDomains(fd.get('adjacentDomains')),isDefault:Boolean(old?.isDefault),createdAt:old?.createdAt||timestamp,updatedAt:timestamp};
+    await storage.put('radarProfiles',profile);
+    if (!old) { const batch=await createRadarBatch(profile); await storage.put('radarBatches',batch); state.radarProfiles.push(profile); selectRadarProfile(profile.id); }
+    if (old) { const batch=state.radarBatches.find((item)=>item.profileId===profile.id); if (batch?.exhausted) await storage.put('radarBatches',{...batch,exhausted:false,updatedAt:timestamp}); }
+    state.radarMessage=''; state.drawer=null; await refresh(old?'探索方向已更新；当前批次保持不变':'探索方向已创建');
+  }
   if (d.type === 'new-member' || d.type === 'edit-member') { const old=state.data.team.find((x)=>x.id===d.id); const m={id:old?.id||uid('member'),name:fd.get('name').trim(),email:fd.get('email').trim(),createdAt:old?.createdAt||timestamp,updatedAt:timestamp}; await storage.put('team',m); state.drawer=null; await refresh('成员已保存；历史名称保持不变'); }
 }
 
@@ -360,15 +430,24 @@ async function saveNoteForm(form) {
 }
 
 async function exploreNew() {
-  const index = Number(state.radar?.index || 0) + 1;
-  state.radar = { id:'current', index, createdAt:now(), items:radarBatch(index) };
-  await storage.put('radar', state.radar);
-  state.data.radar = [state.radar];
-  render(); toast('已生成新的探索批次');
+  const profile=activeRadarProfile(); const current=activeRadarBatch();
+  const result=await radarProvider.getNextBatch(profile,current?.usedItemIds||[]);
+  const timestamp=now();
+  if (result.exhausted) {
+    const unchanged={...current,exhausted:true,lastAttemptAt:timestamp,updatedAt:timestamp};
+    await storage.put('radarBatches',unchanged);
+    state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?unchanged:batch);
+    state.radarMessage='没有新的匹配演示内容，当前批次保持不变。修改方向配置后可再次尝试；真实信息提供方尚未接入。';
+    render(); toast('没有新的演示内容，当前批次未改变','error'); return;
+  }
+  const next={id:radarBatchId(profile.id),profileId:profile.id,sequence:Number(current?.sequence||0)+1,items:result.items,usedItemIds:[...new Set([...(current?.usedItemIds||[]),...result.items.map((item)=>item.id)])],shortages:result.shortages,provider:result.provider,exhausted:false,createdAt:timestamp,updatedAt:timestamp};
+  await storage.put('radarBatches',next);
+  state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?next:batch);
+  state.radarMessage=''; render(); toast('已切换到新的探索批次');
 }
 
 async function saveRadarToNotes(id) {
-  const item = state.radar?.items.find((entry) => entry.id === id);
+  const item = activeRadarBatch()?.items.find((entry) => entry.id === id);
   if (!item) return;
   const timestamp = now();
   const note = { id:uid('note'), source:state.notesMode, title:item.title, content:`${item.explanation}\n\n为什么值得关注：${item.why}\n\n来源：${item.sourceName}\n${item.sourceUrl}`, category:CATEGORIES.includes(item.domain)?item.domain:'Learning', createdAt:timestamp, updatedAt:timestamp };
@@ -377,15 +456,26 @@ async function saveRadarToNotes(id) {
   toast(`已保存到 Notes · ${note.category}`);
 }
 
+async function deleteRadarProfile(profileId) {
+  const profile=state.radarProfiles.find((item)=>item.id===profileId);
+  if (!profile||profile.isDefault) return;
+  if (!confirm(`确定删除探索方向“${profile.name}”吗？该方向的当前批次也会删除。`)) return;
+  await storage.delete('radarProfiles',profile.id);
+  await storage.delete('radarBatches',radarBatchId(profile.id));
+  selectRadarProfile(DEFAULT_PROFILE.id);
+  await refresh('自定义探索方向已删除');
+}
+
 app.addEventListener('click', async (e) => {
   try {
   const nav=e.target.closest('[data-nav]'); if(nav){state.route=nav.dataset.nav; state.search=''; state.drawer=null; render(); return;}
-  const open=e.target.closest('[data-open]'); if(open){openDrawer(open.dataset.open); return;}
+  const open=e.target.closest('[data-open]'); if(open){openDrawer(open.dataset.open,open.dataset.open==='edit-radar-profile'?state.radarProfileId:null); return;}
   if(e.target.closest('[data-close]') || (e.target.classList.contains('drawer-backdrop'))){closeDrawer();return;}
   const newNote=e.target.closest('[data-new-note]'); if(newNote){state.noteId='new';state.noteDraft={category:state.selectedCategory==='All'?'Personal':state.selectedCategory};render();return;}
   const selectNote=e.target.closest('[data-select-note]'); if(selectNote){state.noteId=selectNote.dataset.selectNote;state.noteDraft=null;render();return;}
   const openNote=e.target.closest('[data-open-note]'); if(openNote){state.noteId=openNote.dataset.openNote;state.route='notes';render();return;}
   const category=e.target.closest('[data-category]'); if(category){state.selectedCategory=category.dataset.category;render();return;}
+  const deleteRadar=e.target.closest('[data-delete-radar-profile]'); if(deleteRadar){await deleteRadarProfile(deleteRadar.dataset.deleteRadarProfile);return;}
   if(e.target.closest('[data-explore-new]')){await exploreNew();return;}
   const saveRadar=e.target.closest('[data-save-radar]'); if(saveRadar){await saveRadarToNotes(saveRadar.dataset.saveRadar);return;}
   const task=e.target.closest('[data-task]'); if(task){state.taskId=task.dataset.task;state.taskHistoryTab='activity';state.route='task-detail';render();return;}
@@ -410,7 +500,7 @@ app.addEventListener('click', async (e) => {
 
 app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'||e.target.id==='note-editor-form'){e.preventDefault();try{if(e.target.id==='drawer-form')await onSubmit(e.target);else await saveNoteForm(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
 app.addEventListener('input', (e) => { if(['task-search','company-search','note-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);} });
-app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='note-category-filter'){state.selectedCategory=e.target.value;state.noteId=null;render();} if(e.target.id==='handoff-to'){const member=state.data.team.find((m)=>m.id===e.target.value);const hint=document.querySelector('#handoff-confirm');if(hint)hint.textContent=member?`确认后负责人将更新为 ${member.name}；任务状态保持不变，并保存当前快照。`:'请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
+app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='note-category-filter'){state.selectedCategory=e.target.value;state.noteId=null;render();} if(e.target.id==='radar-profile-select'){selectRadarProfile(e.target.value);render();} if(e.target.id==='handoff-to'){const member=state.data.team.find((m)=>m.id===e.target.value);const hint=document.querySelector('#handoff-confirm');if(hint)hint.textContent=member?`确认后负责人将更新为 ${member.name}；任务状态保持不变，并保存当前快照。`:'请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});
 
 loadData()

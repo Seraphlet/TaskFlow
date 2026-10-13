@@ -185,9 +185,22 @@ tbody tr:last-child td { border-bottom: 0; }
 .category-note-list button:hover { color: var(--coral); }
 .category-note-list span { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .radar-page { max-width: 1220px; }
+.radar-profile-bar { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 14px; padding: 17px 18px; }
+.radar-profile-bar > label { width: min(420px, 100%); display: grid; grid-template-columns: auto minmax(180px, 1fr); align-items: center; gap: 12px; font-size: 13px; font-weight: 750; }
+.radar-profile-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.radar-profile-scope { display: grid; gap: 9px; margin-bottom: 28px; padding: 0 4px; color: var(--muted); font-size: 12px; }
+.radar-profile-scope > div { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.radar-profile-scope b { min-width: 62px; color: var(--ink); }
+.radar-profile-scope span { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #e9edf0; color: #4d5d69; }
+.radar-profile-scope em { font-style: normal; }
+.radar-profile-scope p { margin: 2px 0 0 69px; }
+.radar-demo-notice { display: flex; align-items: flex-start; gap: 12px; margin: -8px 0 20px; padding: 12px 14px; border: 1px solid #d5e1e9; border-radius: 10px; background: #edf4f8; color: #52636f; font-size: 13px; line-height: 1.5; }
+.radar-demo-notice b { flex: 0 0 auto; color: var(--blue); }
+.radar-demo-notice.warning b { color: #8a5d16; }
 .radar-batch-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: -10px 0 34px; color: var(--muted); font-size: 12px; }
 .radar-section { margin-top: 34px; }
 .radar-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.radar-empty { padding: 28px; border: 1px dashed #cfd7dd; border-radius: 12px; color: var(--muted); text-align: center; font-size: 13px; }
 .radar-card { display: flex; flex-direction: column; min-height: 290px; padding: 22px; }
 .radar-card-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .category-chip { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #eaf1f6; color: var(--blue); font-size: 11px; font-weight: 750; }
@@ -270,6 +283,8 @@ tbody tr:last-child td { border-bottom: 0; }
   .stat-row { grid-template-columns: repeat(2, 1fr); }
   .notes-workspace { grid-template-columns: 280px minmax(0, 1fr); }
   .category-grid { grid-template-columns: repeat(3, 1fr); }
+  .radar-profile-bar { align-items: stretch; flex-direction: column; }
+  .radar-profile-bar > label { width: 100%; }
 }
 @media (max-width: 560px) {
   .page-head { display: grid; }
@@ -302,5 +317,8 @@ tbody tr:last-child td { border-bottom: 0; }
   .note-editor-footer > div { align-items: stretch; flex-direction: column; }
   .category-grid { grid-template-columns: repeat(2, 1fr); }
   .radar-grid { grid-template-columns: 1fr; }
+  .radar-profile-bar > label { grid-template-columns: 1fr; }
+  .radar-profile-actions .btn { flex: 1; }
+  .radar-profile-scope p { margin-left: 0; }
   .category-note-list button { flex-direction: column; }
 }

@@ -1,5 +1,14 @@
 (() => {
-  const BATCHES = [
+  const QUOTAS = Object.freeze({ 'Core Domain': 5, 'Adjacent Fields': 2, 'Unknown Window': 1 });
+  const DEFAULT_PROFILE = Object.freeze({
+    id: 'profile_ai_engineering',
+    name: 'AI Engineering',
+    coreDomains: ['AI Engineering', 'Personal Productivity', 'Knowledge Management'],
+    adjacentDomains: ['Learning Science', 'Behavioral Science', 'Product Design'],
+    isDefault: true
+  });
+
+  const DEMO_BATCHES = [
     [
       ['Core Domain', '渐进式总结', 'Learning', '让笔记在再次使用时逐步变得清晰，而不是首次记录就要求完整整理。', '它能降低记录门槛，也保留后续提炼的空间。', 'Forte Labs', 'https://fortelabs.com/blog/progressive-summarization-a-practical-technique-for-designing-discoverable-notes/'],
       ['Core Domain', 'Local-first software', 'AI Engineering', '数据先属于本地设备，网络与服务端是增强而不是前提。', '它直接影响个人工具的数据所有权、离线体验与架构边界。', 'Ink & Switch', 'https://www.inkandswitch.com/local-first/'],
@@ -32,13 +41,48 @@
     ]
   ];
 
-  function batch(index) {
-    return BATCHES[index % BATCHES.length].map((item, order) => ({
-      id: `radar_${index}_${order}`,
-      section: item[0], title: item[1], domain: item[2], explanation: item[3],
-      why: item[4], sourceName: item[5], sourceUrl: item[6]
-    }));
+  const CORE_TERMS = ['AI Engineering', 'Personal Productivity', 'Knowledge Management'];
+  const ADJACENT_TERMS = ['Learning Science', 'Behavioral Science', 'Product Design'];
+  const CATALOG = DEMO_BATCHES.flatMap((items, batchIndex) => items.map((item, order) => ({
+    id: `demo_${batchIndex}_${order}`,
+    section: item[0], title: item[1], domain: item[2], explanation: item[3],
+    why: item[4], sourceName: item[5], sourceUrl: item[6], provider: 'Demo',
+    matchTerms: item[0] === 'Core Domain' ? CORE_TERMS : item[0] === 'Adjacent Fields' ? ADJACENT_TERMS : []
+  })));
+
+  const normalize = (value) => String(value || '').trim().toLocaleLowerCase();
+  const supports = (item, configuredDomains) => configuredDomains.some((domain) => item.matchTerms.some((term) => {
+    const configured = normalize(domain); const supported = normalize(term);
+    return configured && (configured.includes(supported) || supported.includes(configured));
+  }));
+
+  // Future providers only need to implement this method and return the same result shape.
+  class DemoRadarProvider {
+    async getNextBatch(profile, usedItemIds = []) {
+      const used = new Set(usedItemIds);
+      const eligible = CATALOG.filter((item) => !used.has(item.id) && (
+        item.section === 'Unknown Window' ||
+        (item.section === 'Core Domain' && supports(item, profile.coreDomains || [])) ||
+        (item.section === 'Adjacent Fields' && supports(item, profile.adjacentDomains || []))
+      ));
+      const items = Object.entries(QUOTAS).flatMap(([section, quota]) => eligible.filter((item) => item.section === section).slice(0, quota));
+      const counts = Object.fromEntries(Object.keys(QUOTAS).map((section) => [section, items.filter((item) => item.section === section).length]));
+      const shortages = Object.fromEntries(Object.entries(QUOTAS).map(([section, quota]) => [section, quota - counts[section]]));
+      return { items: structuredClone(items), shortages, provider: 'Demo', exhausted: items.length === 0 };
+    }
   }
 
-  window.TaskFlowRadar = { batch, batchCount: BATCHES.length };
+  function normalizeLegacyItems(items = []) {
+    return items.map((legacy) => {
+      const match = CATALOG.find((item) => item.title === legacy.title);
+      return match ? structuredClone(match) : { ...legacy, provider: 'Demo' };
+    });
+  }
+
+  function usedIdsThroughLegacyIndex(index = 0) {
+    const batchesSeen = Math.min(Math.max(Number(index) + 1, 1), DEMO_BATCHES.length);
+    return CATALOG.filter((item) => Number(item.id.split('_')[1]) < batchesSeen).map((item) => item.id);
+  }
+
+  window.TaskFlowRadar = { DemoRadarProvider, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex };
 })();
