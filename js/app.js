@@ -10,7 +10,7 @@ const radarProvider = new DemoRadarProvider();
 const app = document.querySelector('#app');
 const STATUS = ['Todo', 'Doing', 'Blocked', 'Done'];
 const STATUS_LABELS = { Todo: '待办', Doing: '进行中', Blocked: '已阻塞', Done: '已完成' };
-const FIELD_LABELS = { status: '任务状态', remark: '备注', next: '下一步行动', blockedReason: '阻塞说明', owner: '负责人' };
+const FIELD_LABELS = { status: '任务状态', currentSummary: '当前整体进度', remark: '备注', next: '下一步行动', blockedReason: '阻塞说明', owner: '负责人' };
 const CATEGORIES = ['AI Engineering', 'Company', 'Learning', 'Project', 'Personal'];
 const RADAR_ACTIVE_KEY = 'taskflow-radar-active-profile-v1';
 const state = { route: 'tasks', taskId: null, noteId: null, noteDraft: null, selectedCategory: 'All', companyId: null, search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarProfileId: '', radarMessage: '' };
@@ -103,16 +103,17 @@ function toast(message, type = '') {
 function shell(content, title, subtitle) {
   return `<div class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">TF</div><div><h1>TaskFlow</h1><small>Local workspace</small></div></div>
+      <div class="brand"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div><div><h1>TaskFlow</h1><small>个人工作台</small></div></div>
+      <div class="nav-kicker">工作空间</div>
       <nav class="nav-list" aria-label="主导航">
-        ${navButton('radar','◉','Radar')}
-        ${navButton('notes','✎','Notes')}
-        ${navButton('categories','◇','Categories')}
-        ${navButton('tasks','▣','Tasks')}
+        ${navButton('radar','⌁','探索雷达')}
+        ${navButton('notes','✎','随手笔记')}
+        ${navButton('categories','◇','内容分类')}
+        ${navButton('tasks','▣','任务管理')}
       </nav>
-      <div class="local-note">浏览器本地优先 · Notes：${esc(state.notesMode)}<br><button class="sidebar-settings" data-nav="settings">⚙ Settings</button></div>
+      <div class="local-note"><span class="storage-dot"></span><div><b>本地优先</b><small>Notes 数据源：${esc(state.notesMode)}</small></div><button class="sidebar-settings" data-nav="settings" aria-label="打开设置">⚙</button></div>
     </aside>
-    <main class="main"><header class="topbar"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><span class="badge ${state.notesMode === 'Memos' ? 'doing' : 'done'}">${['notes','categories'].includes(state.route) ? esc(state.notesMode) : 'Local'}</span></header>${content}</main>
+    <main class="main"><header class="topbar"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><div class="topbar-state"><span class="status-pulse"></span><span>${['notes','categories'].includes(state.route) ? esc(state.notesMode) : '本地存储'}</span></div></header>${content}</main>
   </div>${renderDrawer()}`;
 }
 
@@ -127,13 +128,14 @@ function taskList() {
     .filter((t) => state.status === 'All' || t.status === state.status)
     .sort((a,b) => b.updatedAt.localeCompare(a.updatedAt));
   const counts = Object.fromEntries(STATUS.map((s) => [s, state.data.tasks.filter((t) => t.status === s).length]));
+  const total = Math.max(state.data.tasks.length, 1);
   return shell(`<section class="page">
-    <div class="page-head"><div><h3>任务总览</h3><p>聚焦要求、当前进度与下一步。</p></div><button class="btn primary" data-open="new-task">＋ 新建任务</button></div>
-    <div class="stat-row">${STATUS.map((s) => `<div class="card stat"><span>${STATUS_LABELS[s]}</span><b>${counts[s]}</b></div>`).join('')}</div>
-    <div class="toolbar"><div class="search"><span>⌕</span><label class="sr-only" for="task-search">搜索任务</label><input id="task-search" class="input" type="search" placeholder="搜索任务、要求或负责人" value="${esc(state.search)}"></div>
+    <div class="page-head"><div><span class="eyebrow">TASK CENTER</span><h3>把注意力放在下一步</h3><p>集中查看任务状态、负责人和最近更新。</p></div><button class="btn primary" data-open="new-task">＋ 新建任务</button></div>
+    <div class="stat-row">${STATUS.map((s) => `<div class="card stat stat-${s.toLowerCase()}"><div><span>${STATUS_LABELS[s]}</span><b>${counts[s]}</b></div><i aria-hidden="true"><em style="width:${Math.round(counts[s] / total * 100)}%"></em></i></div>`).join('')}</div>
+    <div class="toolbar surface-toolbar"><div class="search"><span>⌕</span><label class="sr-only" for="task-search">搜索任务</label><input id="task-search" class="input" type="search" placeholder="搜索任务、要求或负责人" value="${esc(state.search)}"></div>
       <select id="status-filter" class="select filter" aria-label="状态筛选"><option value="All">全部状态</option>${STATUS.map((s) => `<option value="${s}" ${state.status === s ? 'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}</select></div>
-    <div class="card task-table">${tasks.length ? `<table><thead><tr><th>任务</th><th>状态</th><th>负责人</th><th>下一步</th><th>更新</th></tr></thead><tbody>${tasks.map((t) => `<tr class="click-row" data-task="${t.id}"><td><div class="title-cell">${esc(t.title)}</div><div class="subtle">${esc(t.requirement.slice(0,70))}</div></td><td>${badge(t.status)}</td><td>${esc(t.ownerName || '未分配')}</td><td>${esc(t.next || '—')}</td><td class="subtle">${dateText(t.updatedAt)}</td></tr>`).join('')}</tbody></table>` : empty('还没有匹配的任务','新建一个任务，开始记录进展。')}</div>
-  </section>`, 'Tasks', `${state.data.tasks.length} 个任务 · 本地持久化`);
+    <div class="card task-table">${tasks.length ? `<table><thead><tr><th>任务</th><th>状态</th><th>负责人</th><th>下一步</th><th>更新</th><th aria-label="打开"></th></tr></thead><tbody>${tasks.map((t) => `<tr class="click-row" data-task="${t.id}"><td><div class="title-cell">${esc(t.title)}</div><div class="subtle">${esc((t.requirement || '').slice(0,70))}</div></td><td>${badge(t.status)}</td><td><span class="owner-cell">${esc(t.ownerName || '未分配')}</span></td><td class="next-cell">${esc(t.next || '—')}</td><td class="subtle">${dateText(t.updatedAt)}</td><td class="row-arrow">→</td></tr>`).join('')}</tbody></table>` : empty('还没有匹配的任务','新建一个任务，开始记录进展。')}</div>
+  </section>`, '任务管理', `${state.data.tasks.length} 个任务 · 浏览器本地持久化`);
 }
 
 function taskDetail() {
@@ -153,7 +155,7 @@ function taskDetail() {
       <div class="task-next"><span>下一步</span><div class="prose">${esc(task.next || '暂未设置下一步')}</div></div>
     </section>
     <section class="task-remark"><h4>备注</h4><div class="prose">${esc(task.remark || '暂无备注')}</div>${task.delivery ? `<p class="subtle">交付对象或标准：${esc(task.delivery)}</p>` : ''}</section>
-    <section class="task-history"><div class="history-tabs" role="tablist" aria-label="任务历史"><button class="history-tab ${showingActivity ? 'active':''}" type="button" role="tab" aria-selected="${showingActivity}" data-history-tab="activity">Activity <span>${activities.length}</span></button><button class="history-tab ${showingActivity ? '':'active'}" type="button" role="tab" aria-selected="${!showingActivity}" data-history-tab="handoffs">交接记录 <span>${handoffs.length}</span></button></div>
+    <section class="task-history"><div class="history-tabs" role="tablist" aria-label="任务历史"><button class="history-tab ${showingActivity ? 'active':''}" type="button" role="tab" aria-selected="${showingActivity}" data-history-tab="activity">进度记录 <span>${activities.length}</span></button><button class="history-tab ${showingActivity ? '':'active'}" type="button" role="tab" aria-selected="${!showingActivity}" data-history-tab="handoffs">交接记录 <span>${handoffs.length}</span></button></div>
       <div class="history-panel" role="tabpanel">${showingActivity ? (activities.length ? `<div class="timeline">${activities.map(activityItem).join('')}</div>` : '<p class="subtle">暂无进度记录</p>') : (handoffs.length ? `<div class="timeline">${handoffs.map(handoffItem).join('')}</div>` : '<p class="subtle">暂无交接记录</p>')}</div>
     </section>
   </section>`, '任务详情', task.title);
@@ -203,18 +205,18 @@ function notesPage() {
   let selected = state.noteId === 'new' ? { id: 'new', ...state.noteDraft } : state.notes.find((n) => n.id === state.noteId);
   if (!selected && notes.length) { selected = notes[0]; state.noteId = selected.id; }
   const unavailable = state.notesError ? `<div class="warning"><b>${esc(state.notesMode)} 当前不可用：</b>${esc(state.notesError)}</div>` : '';
-  return shell(`<section class="page notes-page"><div class="page-head"><div><h3>Notes</h3><p>快速记录，按分类查看；标题可以留空。</p></div><button class="btn primary" data-new-note ${state.notesError ? 'disabled' : ''}>＋ 新建 Note</button></div>${unavailable}
+  return shell(`<section class="page notes-page"><div class="page-head"><div><span class="eyebrow">QUICK CAPTURE</span><h3>随手记下，再慢慢整理</h3><p>快速记录，按分类查看；标题可以留空。</p></div><button class="btn primary" data-new-note ${state.notesError ? 'disabled' : ''}>＋ 新建笔记</button></div>${unavailable}
     <div class="notes-workspace card"><aside class="notes-list-pane"><div class="notes-list-tools"><div class="search"><span>⌕</span><label class="sr-only" for="note-search">搜索记录</label><input id="note-search" class="input" type="search" placeholder="搜索记录" value="${esc(state.search)}"></div><select id="note-category-filter" class="select" aria-label="分类筛选"><option value="All">全部分类</option>${categoryOptions(state.selectedCategory)}</select></div><div class="notes-list">${notes.length ? notes.map(noteListItem).join('') : `<div class="empty compact"><b>暂无记录</b><p>新建一条简单记录。</p></div>`}</div></aside><section class="note-editor-pane">${selected ? noteEditor(selected) : empty('选择或新建 Note','编辑区会在这里打开。')}</section></div>
-  </section>`, 'Notes', `${state.notes.length} 条记录 · ${state.notesMode}`);
+  </section>`, '随手笔记', `${state.notes.length} 条记录 · ${state.notesMode}`);
 }
 
 function categoriesPage() {
   const groups = CATEGORIES.map((category) => ({ category, notes: state.notes.filter((note) => noteCategory(note) === category).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)) }));
   const active = state.selectedCategory === 'All' ? null : groups.find((group) => group.category === state.selectedCategory);
-  return shell(`<section class="page"><div class="page-head"><div><h3>Categories</h3><p>分类只用于聚合 Notes；Company 是其中一个分类。</p></div></div>
+  return shell(`<section class="page"><div class="page-head"><div><span class="eyebrow">LIBRARY</span><h3>内容分类</h3><p>轻量聚合笔记，快速回到同一主题。</p></div></div>
     <div class="category-grid">${groups.map((group) => `<button class="card category-card ${active?.category === group.category ? 'active' : ''}" data-category="${esc(group.category)}"><span>${esc(group.category)}</span><b>${group.notes.length}</b><small>条记录</small></button>`).join('')}</div>
     <section class="category-notes"><div class="section-title"><h4>${active ? esc(active.category) : '最近记录'}</h4><button class="btn small" data-category="All">查看全部</button></div>${(active ? active.notes : [...state.notes].sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 8)).length ? `<div class="category-note-list">${(active ? active.notes : [...state.notes].sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 8)).map((note) => `<button data-open-note="${esc(note.id)}"><b>${esc(note.title || note.content?.slice(0, 52) || '未命名记录')}</b><span>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span></button>`).join('')}</div>` : `<div class="card">${empty('这个分类还没有记录','在 Notes 中创建或调整一条记录。')}</div>`}</section>
-  </section>`, 'Categories', '简单分类 · 与 Notes 共用数据');
+  </section>`, '内容分类', '简单分类 · 与 Notes 共用数据');
 }
 
 function radarCard(item) {
@@ -230,11 +232,11 @@ function radarPage() {
   return shell(`<section class="page radar-page">
     <div class="radar-profile-bar card"><label>探索方向<select class="select" id="radar-profile-select">${state.radarProfiles.map((item)=>`<option value="${esc(item.id)}" ${item.id===profile?.id?'selected':''}>${esc(item.name)}</option>`).join('')}</select></label><div class="radar-profile-actions"><button class="btn small" data-open="edit-radar-profile">编辑</button>${profile?.isDefault?'':`<button class="btn small danger" data-delete-radar-profile="${esc(profile?.id)}">删除</button>`}<button class="btn small primary" data-open="new-radar-profile">＋ 新建方向</button></div></div>
     <div class="radar-profile-scope"><div><b>核心领域</b>${(profile?.coreDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><div><b>相邻领域</b>${(profile?.adjacentDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><p>Unknown Window 保持开放，不受以上领域限制。</p></div>
-    <div class="page-head"><div><h3>Current Exploration</h3><p>修改方向不会清除当前批次；仅 Explore New 使用新配置。</p></div><button class="btn primary" data-explore-new>Explore New</button></div>
+    <div class="page-head"><div><span class="eyebrow">DISCOVERY FEED</span><h3>本次探索</h3><p>修改方向不会清除当前批次；仅下一次探索使用新配置。</p></div><button class="btn primary" data-explore-new>开始新探索</button></div>
     <div class="radar-demo-notice ${shortageParts.length || batch?.exhausted ? 'warning' : ''}"><b>Demo Provider</b><span>${esc(limitation)}</span></div>
     <div class="radar-batch-meta"><span>探索批次 ${Number(batch?.sequence || 1)}</span><span>生成于 ${dateText(batch?.createdAt || now())}</span><span>共 ${items.length} 条</span></div>
     ${sections.map((section) => { const sectionItems=items.filter((item) => item.section === section); return `<section class="radar-section"><div class="section-title"><h4>${section}</h4><span>${sectionItems.length} / ${QUOTAS[section]}</span></div>${sectionItems.length?`<div class="radar-grid">${sectionItems.map(radarCard).join('')}</div>`:`<div class="radar-empty">暂无匹配的演示内容</div>`}</section>`; }).join('')}
-  </section>`, 'Radar', `${state.radarProfiles.length} 个探索方向 · 当前为 ${profile?.name || '未选择'}`);
+  </section>`, '探索雷达', `${state.radarProfiles.length} 个探索方向 · 当前为 ${profile?.name || '未选择'}`);
 }
 
 function companyList() {
@@ -468,7 +470,7 @@ async function deleteRadarProfile(profileId) {
 
 app.addEventListener('click', async (e) => {
   try {
-  const nav=e.target.closest('[data-nav]'); if(nav){state.route=nav.dataset.nav; state.search=''; state.drawer=null; render(); return;}
+  const nav=e.target.closest('[data-nav]'); if(nav){state.route=nav.dataset.nav; state.search=''; state.drawer=null; render(); window.scrollTo({top:0}); return;}
   const open=e.target.closest('[data-open]'); if(open){openDrawer(open.dataset.open,open.dataset.open==='edit-radar-profile'?state.radarProfileId:null); return;}
   if(e.target.closest('[data-close]') || (e.target.classList.contains('drawer-backdrop'))){closeDrawer();return;}
   const newNote=e.target.closest('[data-new-note]'); if(newNote){state.noteId='new';state.noteDraft={category:state.selectedCategory==='All'?'Personal':state.selectedCategory};render();return;}
@@ -478,7 +480,7 @@ app.addEventListener('click', async (e) => {
   const deleteRadar=e.target.closest('[data-delete-radar-profile]'); if(deleteRadar){await deleteRadarProfile(deleteRadar.dataset.deleteRadarProfile);return;}
   if(e.target.closest('[data-explore-new]')){await exploreNew();return;}
   const saveRadar=e.target.closest('[data-save-radar]'); if(saveRadar){await saveRadarToNotes(saveRadar.dataset.saveRadar);return;}
-  const task=e.target.closest('[data-task]'); if(task){state.taskId=task.dataset.task;state.taskHistoryTab='activity';state.route='task-detail';render();return;}
+  const task=e.target.closest('[data-task]'); if(task){state.taskId=task.dataset.task;state.taskHistoryTab='activity';state.route='task-detail';render();window.scrollTo({top:0});return;}
   const historyTab=e.target.closest('[data-history-tab]'); if(historyTab){state.taskHistoryTab=historyTab.dataset.historyTab;render();return;}
   const company=e.target.closest('[data-company]'); if(company){state.companyId=company.dataset.company;state.route='company-detail';render();return;}
   const editComment=e.target.closest('[data-edit-comment]'); if(editComment){openDrawer('edit-comment',editComment.dataset.editComment);return;}
