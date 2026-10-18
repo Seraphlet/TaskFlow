@@ -1,5 +1,9 @@
 (() => {
   const QUOTAS = Object.freeze({ 'Core Domain': 5, 'Adjacent Fields': 2, 'Unknown Window': 1 });
+  const DEFAULT_MODEL_ID = 'deepseek-flash';
+  const RADAR_CONFIG_KEY = 'taskflow-radar-provider-config-v1';
+  const TAVILY_KEY = 'taskflow-tavily-api-key-v1';
+  const DEEPSEEK_KEY = 'taskflow-deepseek-api-key-v1';
   const DEFAULT_PROFILE = Object.freeze({
     id: 'profile_ai_engineering',
     name: 'AI Engineering',
@@ -72,6 +76,98 @@
     }
   }
 
+  class RadarCredentialStore {
+    getConfig() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(RADAR_CONFIG_KEY));
+        return { provider:'DeepSeek', modelId:DEFAULT_MODEL_ID, remember:false, ...(saved || {}) };
+      } catch { return { provider:'DeepSeek', modelId:DEFAULT_MODEL_ID, remember:false }; }
+    }
+
+    getCredentials() {
+      return {
+        tavilyApiKey: sessionStorage.getItem(TAVILY_KEY) || localStorage.getItem(TAVILY_KEY) || '',
+        deepseekApiKey: sessionStorage.getItem(DEEPSEEK_KEY) || localStorage.getItem(DEEPSEEK_KEY) || ''
+      };
+    }
+
+    validateModel(modelId) {
+      const value = String(modelId || '').trim();
+      if (value.length < 3 || value.length > 64 || !/^deepseek-[a-z0-9][a-z0-9._-]*$/i.test(value)) {
+        throw new Error('模型 ID 必须以 deepseek- 开头，仅包含字母、数字、点、下划线或连字符，长度为 3–64 个字符');
+      }
+      return value;
+    }
+
+    save({ tavilyApiKey, deepseekApiKey, modelId, remember }) {
+      const config = { provider:'DeepSeek', modelId:this.validateModel(modelId), remember:Boolean(remember), updatedAt:new Date().toISOString() };
+      const tavily = String(tavilyApiKey || '').trim();
+      const deepseek = String(deepseekApiKey || '').trim();
+      if (!tavily || !deepseek) throw new Error('请同时填写 Tavily API Key 和 DeepSeek API Key');
+      sessionStorage.removeItem(TAVILY_KEY); sessionStorage.removeItem(DEEPSEEK_KEY);
+      localStorage.removeItem(TAVILY_KEY); localStorage.removeItem(DEEPSEEK_KEY);
+      const target = config.remember ? localStorage : sessionStorage;
+      target.setItem(TAVILY_KEY, tavily); target.setItem(DEEPSEEK_KEY, deepseek);
+      localStorage.setItem(RADAR_CONFIG_KEY, JSON.stringify(config));
+      return config;
+    }
+
+    useSessionOnly() {
+      const credentials = this.getCredentials(); const config = this.getConfig();
+      localStorage.removeItem(TAVILY_KEY); localStorage.removeItem(DEEPSEEK_KEY);
+      if (credentials.tavilyApiKey) sessionStorage.setItem(TAVILY_KEY, credentials.tavilyApiKey);
+      if (credentials.deepseekApiKey) sessionStorage.setItem(DEEPSEEK_KEY, credentials.deepseekApiKey);
+      localStorage.setItem(RADAR_CONFIG_KEY, JSON.stringify({ ...config, remember:false, updatedAt:new Date().toISOString() }));
+    }
+
+    clear() {
+      localStorage.removeItem(RADAR_CONFIG_KEY);
+      sessionStorage.removeItem(TAVILY_KEY); sessionStorage.removeItem(DEEPSEEK_KEY);
+      localStorage.removeItem(TAVILY_KEY); localStorage.removeItem(DEEPSEEK_KEY);
+    }
+  }
+
+  class RemoteRadarProvider {
+    constructor({ tavilyApiKey, deepseekApiKey, modelId }) {
+      this.tavilyApiKey = String(tavilyApiKey || '').trim();
+      this.deepseekApiKey = String(deepseekApiKey || '').trim();
+      this.modelId = String(modelId || DEFAULT_MODEL_ID).trim();
+    }
+
+    assertTrustedContext() {
+      const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+      if (location.protocol !== 'https:' && !(location.protocol === 'http:' && local)) {
+        throw new Error('真实 Radar 仅允许通过 HTTPS，或可信 localhost 的 HTTP 环境使用；双击 HTML 时请继续使用 Demo 模式');
+      }
+      if (!this.tavilyApiKey || !this.deepseekApiKey) throw new Error('请先在 Settings 保存 Tavily 与 DeepSeek API Key');
+    }
+
+    async post(path, payload) {
+      this.assertTrustedContext();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60000);
+      try {
+        const response = await fetch(path, {
+          method:'POST', headers:{ 'Content-Type':'application/json' }, signal:controller.signal,
+          body:JSON.stringify({ ...payload, credentials:{ tavilyApiKey:this.tavilyApiKey, deepseekApiKey:this.deepseekApiKey }, modelId:this.modelId })
+        });
+        const text = await response.text(); let body = null;
+        try { body = text ? JSON.parse(text) : null; } catch { body = null; }
+        if (!response.ok) throw new Error(body?.detail || body?.message || `Radar 服务请求失败（HTTP ${response.status}）`);
+        return body;
+      } catch (error) {
+        if (error.name === 'AbortError') throw new Error('Radar 请求超时，请稍后重试');
+        if (error instanceof TypeError) throw new Error('无法连接 Radar 后端，请确认 FastAPI 服务和反向代理已启动');
+        throw error;
+      } finally { clearTimeout(timer); }
+    }
+
+    async testConnection() { return this.post('/api/radar/test', {}); }
+    async getNextBatch(profile, usedItemIds = []) {
+      return this.post('/api/radar/explore', { profile, usedItemIds });
+    }
+  }
+
   function normalizeLegacyItems(items = []) {
     return items.map((legacy) => {
       const match = CATALOG.find((item) => item.title === legacy.title);
@@ -84,5 +180,5 @@
     return CATALOG.filter((item) => Number(item.id.split('_')[1]) < batchesSeen).map((item) => item.id);
   }
 
-  window.TaskFlowRadar = { DemoRadarProvider, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex };
+  window.TaskFlowRadar = { DemoRadarProvider, RemoteRadarProvider, RadarCredentialStore, DEFAULT_MODEL_ID, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex };
 })();

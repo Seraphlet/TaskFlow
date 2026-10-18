@@ -1,19 +1,20 @@
 const { LocalStorageAdapter, STORES } = window.TaskFlowStorage;
 const { NoopNotificationAdapter, NotificationEvents, formatTaskNotification } = window.TaskFlowNotifications;
 const { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore } = window.TaskFlowNotes;
-const { DemoRadarProvider, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex } = window.TaskFlowRadar;
+const { DemoRadarProvider, RemoteRadarProvider, RadarCredentialStore, DEFAULT_MODEL_ID, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex } = window.TaskFlowRadar;
 
 const storage = new LocalStorageAdapter();
 const notifications = new NoopNotificationAdapter();
 const notesCredentials = new NotesCredentialStore();
 const radarProvider = new DemoRadarProvider();
+const radarCredentials = new RadarCredentialStore();
 const app = document.querySelector('#app');
 const STATUS = ['Todo', 'Doing', 'Blocked', 'Done'];
 const STATUS_LABELS = { Todo: '待办', Doing: '进行中', Blocked: '已阻塞', Done: '已完成' };
 const FIELD_LABELS = { status: '任务状态', currentSummary: '当前整体进度', remark: '备注', next: '下一步行动', blockedReason: '阻塞说明', owner: '负责人' };
 const CATEGORIES = ['AI Engineering', 'Company', 'Learning', 'Project', 'Personal'];
 const RADAR_ACTIVE_KEY = 'taskflow-radar-active-profile-v1';
-const state = { route: 'tasks', taskId: null, noteId: null, noteDraft: null, selectedCategory: 'All', companyId: null, search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarProfileId: '', radarMessage: '' };
+const state = { route: 'tasks', taskId: null, noteId: null, noteDraft: null, selectedCategory: 'All', companyId: null, search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarProfileId: '', radarMessage: '', radarTest: null };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
@@ -220,7 +221,8 @@ function categoriesPage() {
 }
 
 function radarCard(item) {
-  return `<article class="card radar-card"><div class="radar-card-top"><span class="category-chip">${esc(item.domain)}</span><span class="subtle">演示内容 · ${esc(item.sourceName)}</span></div><h4>${esc(item.title)}</h4><p>${esc(item.explanation)}</p><div class="radar-why"><b>为什么值得关注</b><span>${esc(item.why)}</span></div><footer><a class="btn small" href="${esc(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open ↗</a><button class="btn small primary" data-save-radar="${esc(item.id)}">Save Notes</button></footer></article>`;
+  const sourceType = item.provider && item.provider !== 'Demo' ? '联网来源' : '演示内容';
+  return `<article class="card radar-card"><div class="radar-card-top"><span class="category-chip">${esc(item.domain)}</span><span class="subtle">${sourceType} · ${esc(item.sourceName)}</span></div><h4>${esc(item.title)}</h4><p>${esc(item.explanation)}</p>${item.changeSummary ? `<div class="radar-change"><b>本次变化</b><span>${esc(item.changeSummary)}</span></div>` : ''}<div class="radar-why"><b>为什么值得关注</b><span>${esc(item.why)}</span></div><footer><a class="btn small" href="${esc(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open ↗</a><button class="btn small primary" data-save-radar="${esc(item.id)}">Save Notes</button></footer></article>`;
 }
 
 function radarPage() {
@@ -228,12 +230,15 @@ function radarPage() {
   const profile = activeRadarProfile(); const batch = activeRadarBatch();
   const items = batch?.items || [];
   const shortageParts = sections.filter((section) => batch?.shortages?.[section] > 0).map((section) => `${section} 缺 ${batch.shortages[section]} 条`);
-  const limitation = state.radarMessage || (batch?.exhausted ? '没有新的匹配演示内容，当前批次保持不变。修改方向配置后可再次尝试；真实信息提供方尚未接入。' : shortageParts.length ? `当前演示候选不足：${shortageParts.join('，')}。未接入真实信息提供方。` : '当前批次来自内置演示候选库，不是根据用户兴趣实时生成。');
+  const credentials = radarCredentials.getCredentials();
+  const onlineReady = Boolean(credentials.tavilyApiKey && credentials.deepseekApiKey);
+  const isRemoteBatch = batch?.provider && batch.provider !== 'Demo';
+  const limitation = state.radarMessage || (isRemoteBatch ? `本批次由 Tavily 联网搜索与 DeepSeek ${batch.modelId ? `模型 ${batch.modelId}` : '模型'}生成；密钥未写入批次数据。` : batch?.exhausted ? '没有新的匹配内容，当前批次保持不变。可调整方向后再次尝试。' : shortageParts.length ? `当前候选不足：${shortageParts.join('，')}。` : onlineReady ? '真实联网已配置；点击“开始新探索”后将使用 Tavily 与 DeepSeek。当前展示仍是上一次保存的批次。' : '当前批次来自内置演示候选库。在 Settings 配置 Tavily 与 DeepSeek 后可启用真实联网。');
   return shell(`<section class="page radar-page">
     <div class="radar-profile-bar card"><label>探索方向<select class="select" id="radar-profile-select">${state.radarProfiles.map((item)=>`<option value="${esc(item.id)}" ${item.id===profile?.id?'selected':''}>${esc(item.name)}</option>`).join('')}</select></label><div class="radar-profile-actions"><button class="btn small" data-open="edit-radar-profile">编辑</button>${profile?.isDefault?'':`<button class="btn small danger" data-delete-radar-profile="${esc(profile?.id)}">删除</button>`}<button class="btn small primary" data-open="new-radar-profile">＋ 新建方向</button></div></div>
     <div class="radar-profile-scope"><div><b>核心领域</b>${(profile?.coreDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><div><b>相邻领域</b>${(profile?.adjacentDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><p>Unknown Window 保持开放，不受以上领域限制。</p></div>
     <div class="page-head"><div><span class="eyebrow">DISCOVERY FEED</span><h3>本次探索</h3><p>修改方向不会清除当前批次；仅下一次探索使用新配置。</p></div><button class="btn primary" data-explore-new>开始新探索</button></div>
-    <div class="radar-demo-notice ${shortageParts.length || batch?.exhausted ? 'warning' : ''}"><b>Demo Provider</b><span>${esc(limitation)}</span></div>
+    <div class="radar-demo-notice ${shortageParts.length || batch?.exhausted ? 'warning' : ''}"><b>${isRemoteBatch ? 'Live Provider' : onlineReady ? 'Ready' : 'Demo Provider'}</b><span>${esc(limitation)}</span></div>
     <div class="radar-batch-meta"><span>探索批次 ${Number(batch?.sequence || 1)}</span><span>生成于 ${dateText(batch?.createdAt || now())}</span><span>共 ${items.length} 条</span></div>
     ${sections.map((section) => { const sectionItems=items.filter((item) => item.section === section); return `<section class="radar-section"><div class="section-title"><h4>${section}</h4><span>${sectionItems.length} / ${QUOTAS[section]}</span></div>${sectionItems.length?`<div class="radar-grid">${sectionItems.map(radarCard).join('')}</div>`:`<div class="radar-empty">暂无匹配的演示内容</div>`}</section>`; }).join('')}
   </section>`, '探索雷达', `${state.radarProfiles.length} 个探索方向 · 当前为 ${profile?.name || '未选择'}`);
@@ -266,6 +271,9 @@ function teamSettings() {
 
 function settingsPage() {
   const config = notesCredentials.getConfig();
+  const radarConfig = radarCredentials.getConfig();
+  const radarKeys = radarCredentials.getCredentials();
+  const radarConfigured = Boolean(radarKeys.tavilyApiKey && radarKeys.deepseekApiKey);
   const legacyCount = state.data.comments.length;
   return shell(`<section class="page"><div class="page-head"><div><h3>Settings</h3><p>存储状态、团队和备份。</p></div></div>
     <div class="settings-grid"><article class="card setting-card"><h4>TaskFlow 服务状态</h4><p class="subtle">任务存储与 Notes 存储相互独立。</p><div class="setting-row"><span>Task Storage</span><span class="setting-value ready">Local</span></div><div class="setting-row"><span>Remote Adapter</span><span class="setting-value muted">Not Configured</span></div><div class="setting-row"><span>Email Notification</span><span class="setting-value muted">Not Configured</span></div></article>
@@ -279,9 +287,18 @@ function settingsPage() {
         <div id="memos-test-status" class="field-hint">${state.notesError ? esc(state.notesError) : config.mode === 'Memos' ? `已连接 ${esc(config.serverUrl || '')}；仅操作 TaskFlow 标记的 Memos。` : '未配置时 Local 完整可用。连接测试成功后才可启用 Memos。'}</div>
         <div class="warning">从 file:// 连接远程 Memos 可能被 CORS / Origin: null 策略拒绝。不会要求关闭浏览器安全功能，也不会使用第三方代理。</div>
       </article>
+      <article class="card setting-card notes-storage-card"><div class="setting-card-head"><div><h4>Radar 联网服务</h4><p class="subtle">搜索固定使用 Tavily，模型供应商固定为 DeepSeek；API Base URL 不可由前端修改。</p></div><span class="setting-value ${radarConfigured ? 'ready' : 'muted'}">${radarConfigured ? 'Configured' : 'Not Configured'}</span></div>
+        <div class="field"><label>Tavily API Key</label><div class="secret-field"><input class="input" id="tavily-key" type="password" autocomplete="off" placeholder="${radarKeys.tavilyApiKey ? '已保存；留空则保持不变' : 'tvly-…'}"><button class="btn small" type="button" data-toggle-secret="tavily-key" aria-label="显示 Tavily API Key">显示</button></div></div>
+        <div class="field"><label>DeepSeek API Key</label><div class="secret-field"><input class="input" id="deepseek-key" type="password" autocomplete="off" placeholder="${radarKeys.deepseekApiKey ? '已保存；留空则保持不变' : 'sk-…'}"><button class="btn small" type="button" data-toggle-secret="deepseek-key" aria-label="显示 DeepSeek API Key">显示</button></div></div>
+        <div class="field"><label>DeepSeek Model ID</label><input class="input" id="deepseek-model" maxlength="64" value="${esc(radarConfig.modelId || DEFAULT_MODEL_ID)}" placeholder="${DEFAULT_MODEL_ID}"><div class="field-hint">模型名称会独立保存且不属于秘密；仅接受 deepseek- 开头的模型 ID。</div></div>
+        <label class="check-row"><input id="remember-radar-keys" type="checkbox" ${radarConfig.remember ? 'checked':''}> 长期保存在此设备（默认关闭；取消后保存会清除原有持久化密钥）</label>
+        <div class="import-box"><button class="btn" data-test-radar>测试连接</button><button class="btn primary" data-save-radar-config>保存配置</button><button class="btn danger" data-clear-radar-config>清除配置</button></div>
+        <div id="radar-test-status" class="field-hint">${state.radarTest ? esc(state.radarTest) : radarConfigured ? `已配置 DeepSeek · ${esc(radarConfig.modelId || DEFAULT_MODEL_ID)}。测试成功后再开始真实探索。` : '未配置时 Radar 保持 Demo 模式。'}</div>
+        <div class="warning">密钥默认只保留在当前浏览器会话。长期保存会增加共享设备、同源脚本与 XSS 风险；密钥不会进入 URL、TaskFlow JSON 备份或服务端持久化数据。</div>
+      </article>
       ${teamSettings()}
       <article class="card setting-card"><h4>旧版公司墙兼容</h4><p class="subtle">原 companies / comments 数据仍完整保留。可复制为 Local Notes；旧数据不会被删除，重复迁移会按固定 ID 跳过。</p><div class="setting-row"><span>旧版留言</span><b>${legacyCount} 条</b></div><div class="import-box"><button class="btn" data-open-legacy-wall>打开旧版公司墙</button><button class="btn" data-migrate-legacy ${legacyCount ? '' : 'disabled'}>复制到 Local Notes</button></div></article>
-      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">TaskFlow 继续通过既有 Storage Adapter 访问本地数据，Remote Adapter 预留未删除。Notes 使用独立的 LocalNotesAdapter / MemosNotesAdapter；Radar 通过 DemoRadarProvider 获取候选，未来可替换为真实信息提供方。通知接口仍仅定义 TaskCreated 与 TaskHandedOff，未配置时不模拟发送。</p></article>
+      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">TaskFlow 继续通过既有 Storage Adapter 访问本地数据，Remote Adapter 预留未删除。Notes 使用独立的 LocalNotesAdapter / MemosNotesAdapter；Radar 未配置凭证时使用 Demo Provider，配置后由同源 FastAPI 服务调用 Tavily 与 DeepSeek。通知接口仍仅定义 TaskCreated 与 TaskHandedOff，未配置时不模拟发送。</p></article>
     </div></section>`, 'Settings', 'TaskFlow 与 Notes 存储独立配置');
 }
 
@@ -409,6 +426,43 @@ async function connectMemos() {
   notesCredentials.saveConnection(state.memosTest); state.memosTest=null; state.search=''; await refresh('Notes 已切换到 Memos；Local 数据未改动');
 }
 
+function radarDraft() {
+  const saved = radarCredentials.getCredentials();
+  return {
+    tavilyApiKey:document.querySelector('#tavily-key')?.value.trim() || saved.tavilyApiKey,
+    deepseekApiKey:document.querySelector('#deepseek-key')?.value.trim() || saved.deepseekApiKey,
+    modelId:document.querySelector('#deepseek-model')?.value.trim() || DEFAULT_MODEL_ID,
+    remember:Boolean(document.querySelector('#remember-radar-keys')?.checked)
+  };
+}
+
+async function testRadarConnection() {
+  const status = document.querySelector('#radar-test-status');
+  try {
+    const draft = radarDraft();
+    radarCredentials.validateModel(draft.modelId);
+    if (!draft.tavilyApiKey || !draft.deepseekApiKey) throw new Error('请同时填写 Tavily 与 DeepSeek API Key');
+    if (status) status.textContent = '正在分别验证 Tavily、DeepSeek 与模型可用性…';
+    const result = await new RemoteRadarProvider(draft).testConnection();
+    state.radarTest = `连接成功：Tavily 可用，DeepSeek 模型 ${result.modelId || draft.modelId} 可用。`;
+    if (status) status.textContent = state.radarTest;
+    toast('Radar 联网连接测试成功；点击保存配置后启用');
+  } catch (error) {
+    state.radarTest = `测试失败：${error.message}`;
+    if (status) status.textContent = state.radarTest;
+    toast(error.message, 'error');
+  }
+}
+
+async function saveRadarConfig() {
+  try {
+    const config = radarCredentials.save(radarDraft());
+    state.radarTest = null;
+    render();
+    toast(`Radar 配置已保存；密钥${config.remember ? '已长期保存在此设备' : '仅保留在当前会话'}`);
+  } catch (error) { toast(error.message, 'error'); }
+}
+
 async function migrateLegacyWall() {
   const local=new LocalNotesAdapter(storage); const existing=new Set((await local.list()).map((n)=>n.id)); let added=0;
   for(const comment of state.data.comments) {
@@ -433,16 +487,18 @@ async function saveNoteForm(form) {
 
 async function exploreNew() {
   const profile=activeRadarProfile(); const current=activeRadarBatch();
-  const result=await radarProvider.getNextBatch(profile,current?.usedItemIds||[]);
+  const config=radarCredentials.getConfig(); const keys=radarCredentials.getCredentials();
+  const provider=keys.tavilyApiKey&&keys.deepseekApiKey ? new RemoteRadarProvider({...keys,modelId:config.modelId}) : radarProvider;
+  const result=await provider.getNextBatch(profile,current?.usedItemIds||[]);
   const timestamp=now();
   if (result.exhausted) {
     const unchanged={...current,exhausted:true,lastAttemptAt:timestamp,updatedAt:timestamp};
     await storage.put('radarBatches',unchanged);
     state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?unchanged:batch);
-    state.radarMessage='没有新的匹配演示内容，当前批次保持不变。修改方向配置后可再次尝试；真实信息提供方尚未接入。';
-    render(); toast('没有新的演示内容，当前批次未改变','error'); return;
+    state.radarMessage='没有新的匹配内容，当前批次保持不变。修改探索方向后可再次尝试。';
+    render(); toast('没有新的匹配内容，当前批次未改变','error'); return;
   }
-  const next={id:radarBatchId(profile.id),profileId:profile.id,sequence:Number(current?.sequence||0)+1,items:result.items,usedItemIds:[...new Set([...(current?.usedItemIds||[]),...result.items.map((item)=>item.id)])],shortages:result.shortages,provider:result.provider,exhausted:false,createdAt:timestamp,updatedAt:timestamp};
+  const next={id:radarBatchId(profile.id),profileId:profile.id,sequence:Number(current?.sequence||0)+1,items:result.items,usedItemIds:[...new Set([...(current?.usedItemIds||[]),...result.items.map((item)=>item.id)])],shortages:result.shortages,provider:result.provider,modelId:result.modelId||'',exhausted:false,createdAt:timestamp,updatedAt:timestamp};
   await storage.put('radarBatches',next);
   state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?next:batch);
   state.radarMessage=''; render(); toast('已切换到新的探索批次');
@@ -452,7 +508,7 @@ async function saveRadarToNotes(id) {
   const item = activeRadarBatch()?.items.find((entry) => entry.id === id);
   if (!item) return;
   const timestamp = now();
-  const note = { id:uid('note'), source:state.notesMode, title:item.title, content:`${item.explanation}\n\n为什么值得关注：${item.why}\n\n来源：${item.sourceName}\n${item.sourceUrl}`, category:CATEGORIES.includes(item.domain)?item.domain:'Learning', createdAt:timestamp, updatedAt:timestamp };
+  const note = { id:uid('note'), source:state.notesMode, title:item.title, content:`${item.explanation}${item.changeSummary ? `\n\n本次变化：${item.changeSummary}` : ''}\n\n为什么值得关注：${item.why}\n\n来源：${item.sourceName}\n${item.sourceUrl}`, category:CATEGORIES.includes(item.domain)?item.domain:'Learning', createdAt:timestamp, updatedAt:timestamp };
   await currentNotesAdapter().create(note);
   await loadNotes();
   toast(`已保存到 Notes · ${note.category}`);
@@ -490,6 +546,10 @@ app.addEventListener('click', async (e) => {
   if(e.target.closest('[data-connect-memos]')){await connectMemos();return;}
   if(e.target.closest('[data-disconnect-memos]')){notesCredentials.useLocal();state.search='';await refresh('Notes 已切换回 Local；Memos 数据未改动');return;}
   if(e.target.closest('[data-clear-memos]') && confirm('确定清除已保存的 Memos 配置和令牌吗？远端数据不会被删除。')){notesCredentials.clear();state.memosTest=null;await refresh('Memos 凭据已清除，Notes 使用 Local');return;}
+  const toggleSecret=e.target.closest('[data-toggle-secret]'); if(toggleSecret){const input=document.querySelector(`#${toggleSecret.dataset.toggleSecret}`);if(input){const showing=input.type==='text';input.type=showing?'password':'text';toggleSecret.textContent=showing?'显示':'隐藏';toggleSecret.setAttribute('aria-label',`${showing?'显示':'隐藏'} ${input.id==='tavily-key'?'Tavily':'DeepSeek'} API Key`);}return;}
+  if(e.target.closest('[data-test-radar]')){await testRadarConnection();return;}
+  if(e.target.closest('[data-save-radar-config]')){await saveRadarConfig();return;}
+  if(e.target.closest('[data-clear-radar-config]') && confirm('确定清除 Radar 配置吗？会话与长期保存的两组 API Key 都会删除。')){radarCredentials.clear();state.radarTest=null;render();toast('Radar 配置及所有本地密钥已清除，已恢复 Demo 模式');return;}
   if(e.target.closest('[data-open-legacy-wall]')){state.route='companies';state.search='';render();return;}
   if(e.target.closest('[data-migrate-legacy]')){await migrateLegacyWall();return;}
   const deleteNote=e.target.closest('[data-delete-note]'); if(deleteNote && confirm(`确定从 ${state.notesMode} 删除这条 Note 吗？此操作不会影响另一数据源。`)){await currentNotesAdapter().delete(deleteNote.dataset.deleteNote);state.noteId=null;state.drawer=null;await refresh(`Note 已从 ${state.notesMode} 删除`);return;}
@@ -502,7 +562,7 @@ app.addEventListener('click', async (e) => {
 
 app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'||e.target.id==='note-editor-form'){e.preventDefault();try{if(e.target.id==='drawer-form')await onSubmit(e.target);else await saveNoteForm(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
 app.addEventListener('input', (e) => { if(['task-search','company-search','note-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);} });
-app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='note-category-filter'){state.selectedCategory=e.target.value;state.noteId=null;render();} if(e.target.id==='radar-profile-select'){selectRadarProfile(e.target.value);render();} if(e.target.id==='handoff-to'){const member=state.data.team.find((m)=>m.id===e.target.value);const hint=document.querySelector('#handoff-confirm');if(hint)hint.textContent=member?`确认后负责人将更新为 ${member.name}；任务状态保持不变，并保存当前快照。`:'请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
+app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='note-category-filter'){state.selectedCategory=e.target.value;state.noteId=null;render();} if(e.target.id==='radar-profile-select'){selectRadarProfile(e.target.value);render();} if(e.target.id==='remember-radar-keys'&&!e.target.checked){radarCredentials.useSessionOnly();toast('已清除长期保存的 Radar 密钥；当前会话仍可继续使用');} if(e.target.id==='handoff-to'){const member=state.data.team.find((m)=>m.id===e.target.value);const hint=document.querySelector('#handoff-confirm');if(hint)hint.textContent=member?`确认后负责人将更新为 ${member.name}；任务状态保持不变，并保存当前快照。`:'请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});
 
 loadData()

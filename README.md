@@ -1,10 +1,20 @@
 # TaskFlow Workspace V1
 
-一个无构建依赖的本地优先个人工作台，包含 Radar、Notes、Categories 和 Tasks。项目使用传统 HTML、CSS 和 JavaScript，不依赖 Python、Node.js 或前端构建工具。
+一个无构建依赖的本地优先个人工作台，包含 Radar、Notes、Categories 和 Tasks。前端使用传统 HTML、CSS 和 JavaScript；任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
 
 ## 运行
 
 直接双击项目根目录中的 `index.html` 即可运行，无需启动服务。
+
+双击模式下 Radar 使用内置 Demo Provider。要使用真实联网推荐，请安装 Python 3.11+ 并启动同源服务：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn server.app:app --host 127.0.0.1 --port 8788
+```
+
+浏览器访问 `http://127.0.0.1:8788`。HTTP 仅允许可信的 localhost 开发环境；正式部署必须使用 HTTPS。
 
 也可以选择通过任意静态 HTTP 服务器访问，例如：
 
@@ -24,6 +34,10 @@ js/storage.js           IndexedDB Local Adapter 与 Remote Adapter 边界
 js/notifications.js     通知事件、纯文本格式与未配置适配器
 js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版本兼容
 js/radar.js             Radar Item 模型、演示 Provider 与生成边界
+server/app.py           FastAPI 静态入口、Tavily 搜索、DeepSeek 生成及生命周期存储
+server/security.py      模型 ID 校验、凭证身份与内容指纹
+requirements.txt        可选 Radar 后端依赖
+tests/                  凭证安全、模型校验和 API 边界测试
 ```
 
 ## 数据与兼容性
@@ -32,6 +46,8 @@ js/radar.js             Radar Item 模型、演示 Provider 与生成边界
 - Categories 直接聚合 Note 的 `category` 字段，不维护独立分类数据库。旧 Note 中存在 `companyName` 时会兼容显示为 `Company`。
 - Radar 的 Profile 与 Batch 分开保存。每个 Profile 恢复自己的当前批次；仅点击 `Explore New` 才向演示 Provider 请求下一批。
 - 内置 Provider 仍只有有限的演示 Radar Items。它不会循环三批内容，也不会把不匹配用户领域的固定内容伪装成生成结果；候选不足会在页面明确提示。
+- 配置 Tavily 与 DeepSeek 凭证后，`Explore New` 会改用真实 Provider。单次最多执行 3 次 Tavily 搜索，缓存默认 24 小时；推荐历史默认保存 180 天，Inbox 最长保存 30 天。
+- 月度 Tavily 硬预算默认每组凭证身份 1000 次，可通过服务端 `TASKFLOW_TAVILY_MONTHLY_BUDGET` 调整。预算、缓存和跨 Profile 去重使用不可逆 HMAC 身份隔离，SQLite 数据在服务重启后继续有效。
 - 原 `companies` / `comments` 数据仍保留，可在 Settings 中显式复制到 `Company` 分类的 Local Notes；迁移不删除旧数据并按固定 ID 去重。
 - JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1/V2/V3 备份仍可导入。Memos 远端数据和访问令牌不会进入导出文件。
 - `file://` 存储可能被不同浏览器或文件路径隔离。启动时若 IndexedDB 不可用，应用会明确报错而不是静默丢失数据。
@@ -45,3 +61,13 @@ Notes 默认使用 Local。Settings 中可填写自己的 Memos 地址和 Person
 浏览器从 `file://` 访问远端 Memos 可能因 CORS 或 `Origin: null` 被拒绝。应用不会绕过浏览器安全策略，也不会把 Token 发送给第三方代理；遇到此情况可继续使用 Local，或将静态页面部署到 Memos 允许的受信任来源。
 
 Memos Server URL 可以填写实例根地址，也可以粘贴设置页链接；应用会自动提取 HTTPS 站点 origin，避免请求到 `/setting/api/...` 等错误路径。
+
+## Radar 联网配置（可选）
+
+Settings 中可以配置 Tavily API Key、DeepSeek API Key 和 DeepSeek Model ID。供应商固定为 DeepSeek，API Base URL 固定在后端，前端不能覆盖。默认模型 ID 为 `deepseek-flash`；也支持符合 `deepseek-*` 命名规则的模型，最终可用性由 DeepSeek 接口验证。
+
+API Key 默认写入 `sessionStorage`。只有用户主动勾选“长期保存在此设备”后才会写入 `localStorage`；取消勾选会立即清除持久化密钥并只保留当前会话副本，“清除配置”会同时清理两个位置。模型名称单独保存，不属于秘密。
+
+密钥只通过同源 POST 请求 Body 发送，不进入 URL、TaskFlow JSON 导入导出、后端数据库、推荐消息或日志。后端仅为调用 Tavily 与 DeepSeek 在请求生命周期内使用明文 Key。浏览器长期存储不能抵御共享设备访问、同源恶意脚本或 XSS，建议只在个人可信设备启用。
+
+生产环境建议由 Nginx 将站点与 `/api/radar/` 同源反向代理到 FastAPI，并启用 HTTPS。不要把 FastAPI 数据目录、Git 仓库或其他服务器文件配置为公开静态目录。

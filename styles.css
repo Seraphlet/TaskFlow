@@ -235,6 +235,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .radar-card h4 { margin: 22px 0 9px; font-size: 21px; line-height: 1.28; letter-spacing: -.02em; }
 .radar-card > p { margin: 0; color: var(--muted); line-height: 1.6; }
 .radar-why { display: grid; gap: 5px; margin: 19px 0; padding: 13px 15px; border-left: 3px solid var(--coral); border-radius: 0 9px 9px 0; background: #fff8f4; font-size: 13px; line-height: 1.55; }
+.radar-change { display: grid; gap: 5px; margin-top: 16px; padding: 12px 14px; border-radius: 9px; background: #eef7f2; color: #365f4e; font-size: 13px; line-height: 1.5; }
 .radar-card footer { display: flex; gap: 8px; margin-top: auto; padding-top: 16px; }
 .handoff-flow { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; border-radius: 10px; background: #f5f7f8; }
 .handoff-flow div { display: grid; justify-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
@@ -287,6 +288,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .warning { background: #fff8e8; color: #775113; border: 1px solid #f0d79a; border-radius: 10px; padding: 13px 15px; font-size: 13px; line-height: 1.5; }
 .import-box { display: flex; flex-wrap: wrap; gap: 10px; }
 .notes-storage-card { grid-column: 1 / -1; display: grid; gap: 14px; }
+.setting-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.setting-card-head h4 { margin-bottom: 6px; }
+.setting-card-head p { margin: 0; }
+.secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.secret-field .btn { min-width: 62px; }
 .toast-region { position: fixed; right: 22px; bottom: 22px; z-index: 50; display: grid; gap: 10px; }
 .toast { width: min(370px, calc(100vw - 44px)); color: white; background: var(--navy); padding: 13px 16px; border-radius: 10px; box-shadow: var(--shadow); animation: toast-in .18s ease-out; }
 .toast.error { background: var(--red); }
@@ -307,6 +313,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .topbar { display: none; }
   .page { padding: 28px 20px 44px; }
   .settings-grid { grid-template-columns: 1fr; }
+  .setting-card-head { align-items: stretch; flex-direction: column; }
   .task-focus { grid-template-columns: 1fr; }
   .task-next { border-left: 0; border-top: 1px solid #f1d9cf; }
   .stat-row { grid-template-columns: repeat(2, 1fr); }
