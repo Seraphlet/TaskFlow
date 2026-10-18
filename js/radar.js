@@ -142,10 +142,10 @@
       if (!this.tavilyApiKey || !this.deepseekApiKey) throw new Error('请先在 Settings 保存 Tavily 与 DeepSeek API Key');
     }
 
-    async post(path, payload) {
+    async post(path, payload, timeoutMs = 60000) {
       this.assertTrustedContext();
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 60000);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await fetch(path, {
           method:'POST', headers:{ 'Content-Type':'application/json' }, signal:controller.signal,
@@ -164,7 +164,7 @@
 
     async testConnection() { return this.post('/api/radar/test', {}); }
     async getNextBatch(profile, usedItemIds = []) {
-      return this.post('/api/radar/explore', { profile, usedItemIds });
+      return this.post('/api/radar/explore', { profile, usedItemIds }, 240000);
     }
   }
 

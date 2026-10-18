@@ -15,10 +15,11 @@ function storage() {
 const localStorage = storage();
 const sessionStorage = storage();
 let request;
+let requestTimeout;
 const context = {
   window: {}, localStorage, sessionStorage, structuredClone, URLSearchParams,
   location: { protocol: 'https:', hostname: 'taskflow.example' },
-  AbortController, setTimeout, clearTimeout,
+  AbortController, setTimeout: (callback, delay) => { requestTimeout = delay; return setTimeout(callback, delay); }, clearTimeout,
   fetch: async (url, options) => {
     request = { url, options };
     return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, modelId: 'deepseek-flash' }) };
@@ -47,6 +48,10 @@ assert.strictEqual(sessionStorage.has('taskflow-tavily-api-key-v1'), true);
   assert.strictEqual(request.url.includes('sk-header-or-body-only'), false);
   const body = JSON.parse(request.options.body);
   assert.strictEqual(body.credentials.tavilyApiKey, 'tvly-header-or-body-only');
+
+  await new RemoteRadarProvider({ tavilyApiKey: 'tvly-header-or-body-only', deepseekApiKey: 'sk-header-or-body-only', modelId: 'deepseek-flash' }).getNextBatch({ id:'p', name:'P' }, []);
+  assert.strictEqual(request.url, '/api/radar/explore');
+  assert.strictEqual(requestTimeout, 240000);
 
   credentials.clear();
   const cleared = credentials.getCredentials();

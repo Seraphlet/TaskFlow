@@ -33,6 +33,7 @@ HISTORY_DAYS = 180
 INBOX_DAYS = 30
 MAX_SEARCHES_PER_EXPLORE = 3
 QUOTAS = {"Core Domain": 5, "Adjacent Fields": 2, "Unknown Window": 1}
+EXPLORE_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class Credentials(BaseModel):
@@ -361,6 +362,39 @@ def normalize_items(raw: Any, candidates: list[dict[str, Any]]) -> list[dict[str
     return normalized
 
 
+def recover_unreceived_batch(
+    db: sqlite3.Connection,
+    identity: str,
+    profile_id: str,
+    model_id: str,
+    used_item_ids: list[str],
+) -> dict[str, Any] | None:
+    used = set(used_item_ids)
+    rows = db.execute(
+        "SELECT payload FROM inbox WHERE identity=? AND profile_id=? ORDER BY id DESC LIMIT 5",
+        (identity, profile_id),
+    ).fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+            if payload.get("modelId") != model_id:
+                continue
+            unseen = [item for item in payload.get("items", []) if item.get("id") not in used]
+            if not unseen:
+                continue
+            counts = {section: len([item for item in unseen if item.get("section") == section]) for section in QUOTAS}
+            return {
+                **payload,
+                "items": unseen,
+                "shortages": {section: max(0, quota - counts[section]) for section, quota in QUOTAS.items()},
+                "exhausted": False,
+                "replayed": True,
+            }
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return None
+
+
 app = FastAPI(title="TaskFlow Radar API", version="0.2.0", docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
@@ -409,6 +443,14 @@ async def explore(request: ExploreRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     identity = credential_identity(IDENTITY_SECRET, request.credentials.tavilyApiKey, request.credentials.deepseekApiKey)
+    lock = EXPLORE_LOCKS.setdefault(identity, asyncio.Lock())
+    if lock.locked():
+        raise HTTPException(409, "当前凭证已有搜索正在进行，请等待完成后再试")
+    async with lock:
+        return await explore_locked(request, model_id, identity)
+
+
+async def explore_locked(request: ExploreRequest, model_id: str, identity: str) -> dict[str, Any]:
     with connect_db() as db:
         cleanup(db)
         candidates: list[dict[str, Any]] = []
@@ -422,6 +464,9 @@ async def explore(request: ExploreRequest) -> dict[str, Any]:
             )
             candidates.extend(prepare_candidates(db, identity, section, results))
         if not candidates:
+            recovered = recover_unreceived_batch(db, identity, request.profile.id, model_id, request.usedItemIds)
+            if recovered:
+                return recovered
             return {"items": [], "shortages": QUOTAS, "provider": "Tavily + DeepSeek", "modelId": model_id, "exhausted": True}
 
         search_providers = {str(item.get("_searchProvider", "Tavily")) for item in candidates}

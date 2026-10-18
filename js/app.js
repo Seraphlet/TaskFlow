@@ -14,7 +14,7 @@ const STATUS_LABELS = { Todo: '待办', Doing: '进行中', Blocked: '已阻塞'
 const FIELD_LABELS = { status: '任务状态', currentSummary: '当前整体进度', remark: '备注', next: '下一步行动', blockedReason: '阻塞说明', owner: '负责人' };
 const CATEGORIES = ['AI Engineering', 'Company', 'Learning', 'Project', 'Personal'];
 const RADAR_ACTIVE_KEY = 'taskflow-radar-active-profile-v1';
-const state = { route: 'tasks', taskId: null, noteId: null, noteDraft: null, selectedCategory: 'All', companyId: null, search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarProfileId: '', radarMessage: '', radarTest: null };
+const state = { route: 'tasks', taskId: null, noteId: null, noteDraft: null, selectedCategory: 'All', companyId: null, search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
@@ -237,7 +237,7 @@ function radarPage() {
   return shell(`<section class="page radar-page">
     <div class="radar-profile-bar card"><label>探索方向<select class="select" id="radar-profile-select">${state.radarProfiles.map((item)=>`<option value="${esc(item.id)}" ${item.id===profile?.id?'selected':''}>${esc(item.name)}</option>`).join('')}</select></label><div class="radar-profile-actions"><button class="btn small" data-open="edit-radar-profile">编辑</button>${profile?.isDefault?'':`<button class="btn small danger" data-delete-radar-profile="${esc(profile?.id)}">删除</button>`}<button class="btn small primary" data-open="new-radar-profile">＋ 新建方向</button></div></div>
     <div class="radar-profile-scope"><div><b>核心领域</b>${(profile?.coreDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><div><b>相邻领域</b>${(profile?.adjacentDomains||[]).map((domain)=>`<span>${esc(domain)}</span>`).join('') || '<em>未设置</em>'}</div><p>Unknown Window 保持开放，不受以上领域限制。</p></div>
-    <div class="page-head"><div><span class="eyebrow">DISCOVERY FEED</span><h3>本次探索</h3><p>修改方向不会清除当前批次；仅下一次探索使用新配置。</p></div><button class="btn primary" data-explore-new>开始新探索</button></div>
+    <div class="page-head"><div><span class="eyebrow">DISCOVERY FEED</span><h3>本次探索</h3><p>修改方向不会清除当前批次；仅下一次探索使用新配置。</p></div><button class="btn primary" data-explore-new ${state.radarSearching?'disabled aria-busy="true"':''}>${state.radarSearching?'正在联网搜索，请稍候…':'开始新探索'}</button></div>
     <div class="radar-demo-notice ${shortageParts.length || batch?.exhausted ? 'warning' : ''}"><b>${isRemoteBatch ? 'Live Provider' : onlineReady ? 'Ready' : 'Demo Provider'}</b><span>${esc(limitation)}</span></div>
     <div class="radar-batch-meta"><span>探索批次 ${Number(batch?.sequence || 1)}</span><span>生成于 ${dateText(batch?.createdAt || now())}</span><span>共 ${items.length} 条</span></div>
     ${sections.map((section) => { const sectionItems=items.filter((item) => item.section === section); return `<section class="radar-section"><div class="section-title"><h4>${section}</h4><span>${sectionItems.length} / ${QUOTAS[section]}</span></div>${sectionItems.length?`<div class="radar-grid">${sectionItems.map(radarCard).join('')}</div>`:`<div class="radar-empty">暂无匹配的演示内容</div>`}</section>`; }).join('')}
@@ -287,7 +287,7 @@ function settingsPage() {
         <div id="memos-test-status" class="field-hint">${state.notesError ? esc(state.notesError) : config.mode === 'Memos' ? `已连接 ${esc(config.serverUrl || '')}；仅操作 TaskFlow 标记的 Memos。` : '未配置时 Local 完整可用。连接测试成功后才可启用 Memos。'}</div>
         <div class="warning">从 file:// 连接远程 Memos 可能被 CORS / Origin: null 策略拒绝。不会要求关闭浏览器安全功能，也不会使用第三方代理。</div>
       </article>
-      <article class="card setting-card notes-storage-card"><div class="setting-card-head"><div><h4>Radar 联网服务</h4><p class="subtle">搜索固定使用 Tavily，模型供应商固定为 DeepSeek；API Base URL 不可由前端修改。</p></div><span class="setting-value ${radarConfigured ? 'ready' : 'muted'}">${radarConfigured ? 'Configured' : 'Not Configured'}</span></div>
+      <article class="card setting-card notes-storage-card"><div class="setting-card-head"><div><h4>Radar 联网服务</h4><p class="subtle">搜索优先使用 Tavily，服务异常时自动切换 DeepSeek Search；模型供应商固定为 DeepSeek。</p></div><span class="setting-value ${radarConfigured ? 'ready' : 'muted'}">${radarConfigured ? 'Configured' : 'Not Configured'}</span></div>
         <div class="field"><label>Tavily API Key</label><div class="secret-field"><input class="input" id="tavily-key" type="password" autocomplete="off" placeholder="${radarKeys.tavilyApiKey ? '已保存；留空则保持不变' : 'tvly-…'}"><button class="btn small" type="button" data-toggle-secret="tavily-key" aria-label="显示 Tavily API Key">显示</button></div></div>
         <div class="field"><label>DeepSeek API Key</label><div class="secret-field"><input class="input" id="deepseek-key" type="password" autocomplete="off" placeholder="${radarKeys.deepseekApiKey ? '已保存；留空则保持不变' : 'sk-…'}"><button class="btn small" type="button" data-toggle-secret="deepseek-key" aria-label="显示 DeepSeek API Key">显示</button></div></div>
         <div class="field"><label>DeepSeek Model ID</label><input class="input" id="deepseek-model" maxlength="64" value="${esc(radarConfig.modelId || DEFAULT_MODEL_ID)}" placeholder="${DEFAULT_MODEL_ID}"><div class="field-hint">模型名称会独立保存且不属于秘密；仅接受 deepseek- 开头的模型 ID。</div></div>
@@ -486,22 +486,35 @@ async function saveNoteForm(form) {
 }
 
 async function exploreNew() {
+  if (state.radarSearching) { toast('搜索正在进行中，请等待当前探索完成'); return; }
   const profile=activeRadarProfile(); const current=activeRadarBatch();
   const config=radarCredentials.getConfig(); const keys=radarCredentials.getCredentials();
   const provider=keys.tavilyApiKey&&keys.deepseekApiKey ? new RemoteRadarProvider({...keys,modelId:config.modelId}) : radarProvider;
-  const result=await provider.getNextBatch(profile,current?.usedItemIds||[]);
-  const timestamp=now();
-  if (result.exhausted) {
-    const unchanged={...current,exhausted:true,lastAttemptAt:timestamp,updatedAt:timestamp};
-    await storage.put('radarBatches',unchanged);
-    state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?unchanged:batch);
-    state.radarMessage='没有新的匹配内容，当前批次保持不变。修改探索方向后可再次尝试。';
-    render(); toast('没有新的匹配内容，当前批次未改变','error'); return;
+  state.radarSearching=true;
+  state.radarMessage='正在联网搜索并整理推荐，通常需要 30 秒到 2 分钟。请保持页面打开，不要重复点击。';
+  render();
+  try {
+    const result=await provider.getNextBatch(profile,current?.usedItemIds||[]);
+    const timestamp=now();
+    if (result.exhausted) {
+      const unchanged={...current,exhausted:true,lastAttemptAt:timestamp,updatedAt:timestamp};
+      await storage.put('radarBatches',unchanged);
+      state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?unchanged:batch);
+      state.radarMessage='本次搜索结果均已在最近 180 天推荐过，当前批次保持不变。可调整探索方向后再次尝试。';
+      toast('本次没有尚未推荐过的新内容','error'); return;
+    }
+    const next={id:radarBatchId(profile.id),profileId:profile.id,sequence:Number(current?.sequence||0)+1,items:result.items,usedItemIds:[...new Set([...(current?.usedItemIds||[]),...result.items.map((item)=>item.id)])],shortages:result.shortages,provider:result.provider,modelId:result.modelId||'',exhausted:false,createdAt:timestamp,updatedAt:timestamp};
+    await storage.put('radarBatches',next);
+    state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?next:batch);
+    state.radarMessage=result.replayed?'已恢复后端完成但浏览器此前未接收的探索结果。':'';
+    toast(result.replayed?'已恢复上一次探索结果':'已切换到新的探索批次');
+  } catch (error) {
+    state.radarMessage=`探索失败：${error.message}`;
+    toast(error.message,'error');
+  } finally {
+    state.radarSearching=false;
+    render();
   }
-  const next={id:radarBatchId(profile.id),profileId:profile.id,sequence:Number(current?.sequence||0)+1,items:result.items,usedItemIds:[...new Set([...(current?.usedItemIds||[]),...result.items.map((item)=>item.id)])],shortages:result.shortages,provider:result.provider,modelId:result.modelId||'',exhausted:false,createdAt:timestamp,updatedAt:timestamp};
-  await storage.put('radarBatches',next);
-  state.radarBatches=state.radarBatches.map((batch)=>batch.profileId===profile.id?next:batch);
-  state.radarMessage=''; render(); toast('已切换到新的探索批次');
 }
 
 async function saveRadarToNotes(id) {
