@@ -26,4 +26,3 @@ def content_fingerprint(url: str, content: str) -> str:
 
 def stable_item_id(url: str, title: str) -> str:
     return "live_" + hashlib.sha256(f"{url}\0{title}".encode("utf-8")).hexdigest()[:20]
-
