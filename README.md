@@ -66,6 +66,8 @@ Memos Server URL 可以填写实例根地址，也可以粘贴设置页链接；
 
 Settings 中可以配置 Tavily API Key、DeepSeek API Key 和 DeepSeek Model ID。供应商固定为 DeepSeek，API Base URL 固定在后端，前端不能覆盖。默认模型 ID 为 `deepseek-flash`，当前该 ID 对应 DeepSeek V4.1 Flash；当前接口同时提供 `deepseek-v4-pro`。其他符合 `deepseek-*` 命名规则的模型仍会交由 DeepSeek 接口验证并返回明确错误。
 
+Radar 的结构化 JSON 生成使用非思考模式，避免思考内容占用输出额度后截断最终 JSON；这不影响 DeepSeek Search 作为 Tavily 故障时的备用搜索能力。
+
 API Key 默认写入 `sessionStorage`。只有用户主动勾选“长期保存在此设备”后才会写入 `localStorage`；取消勾选会立即清除持久化密钥并只保留当前会话副本，“清除配置”会同时清理两个位置。模型名称单独保存，不属于秘密。
 
 密钥只通过同源 POST 请求 Body 发送，不进入 URL、TaskFlow JSON 导入导出、后端数据库、推荐消息或日志。后端仅为调用 Tavily 与 DeepSeek 在请求生命周期内使用明文 Key。浏览器长期存储不能抵御共享设备访问、同源恶意脚本或 XSS，建议只在个人可信设备启用。

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import secrets
@@ -259,15 +260,30 @@ def parse_deepseek_json(content: Any, finish_reason: Any = None) -> dict[str, An
 
 
 async def deepseek_json(api_key: str, model_id: str, messages: list[dict[str, str]], max_tokens: int = 6000) -> dict[str, Any]:
-    try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            response = await client.post(
-                DEEPSEEK_URL,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": model_id, "messages": messages, "temperature": 0.25, "max_tokens": max_tokens, "response_format": {"type": "json_object"}},
-            )
-    except httpx.RequestError as exc:
-        raise HTTPException(502, "无法连接 DeepSeek，请检查网络后重试") from exc
+    response: httpx.Response | None = None
+    last_error: httpx.RequestError | None = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    DEEPSEEK_URL,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": model_id,
+                        "messages": messages,
+                        "thinking": {"type": "disabled"},
+                        "temperature": 0.25,
+                        "max_tokens": max_tokens,
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+            break
+        except httpx.RequestError as exc:
+            last_error = exc
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+    if response is None:
+        raise HTTPException(502, "无法连接 DeepSeek，请检查网络后重试") from last_error
     if response.status_code in (401, 403):
         raise HTTPException(400, "DeepSeek API Key 无效或无权限")
     if response.status_code in (400, 404):
@@ -381,7 +397,7 @@ async def test_connection(request: ProviderRequest) -> dict[str, Any]:
         request.credentials.deepseekApiKey,
         model_id,
         [{"role": "system", "content": "Return JSON only."}, {"role": "user", "content": '{"ok":true}'}],
-        max_tokens=32,
+        max_tokens=128,
     )
     return {"ok": True, "provider": "DeepSeek", "modelId": model_id}
 
