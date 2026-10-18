@@ -46,7 +46,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 - Categories 直接聚合 Note 的 `category` 字段，不维护独立分类数据库。旧 Note 中存在 `companyName` 时会兼容显示为 `Company`。
 - Radar 的 Profile 与 Batch 分开保存。每个 Profile 恢复自己的当前批次；仅点击 `Explore New` 才向演示 Provider 请求下一批。
 - 内置 Provider 仍只有有限的演示 Radar Items。它不会循环三批内容，也不会把不匹配用户领域的固定内容伪装成生成结果；候选不足会在页面明确提示。
-- 配置 Tavily 与 DeepSeek 凭证后，`Explore New` 会改用真实 Provider。单次最多执行 3 次 Tavily 搜索，缓存默认 24 小时；推荐历史默认保存 180 天，Inbox 最长保存 30 天。
+- 配置 Tavily 与 DeepSeek 凭证后，`Explore New` 会改用真实 Provider。每次最多生成 3 组搜索查询并优先使用 Tavily；仅在 Tavily 网络故障、限流或服务端错误时使用 DeepSeek Search 作为备用，Tavily 凭证错误仍会明确提示。缓存默认 24 小时；推荐历史默认保存 180 天，Inbox 最长保存 30 天。
 - 月度 Tavily 硬预算默认每组凭证身份 1000 次，可通过服务端 `TASKFLOW_TAVILY_MONTHLY_BUDGET` 调整。预算、缓存和跨 Profile 去重使用不可逆 HMAC 身份隔离，SQLite 数据在服务重启后继续有效。
 - 原 `companies` / `comments` 数据仍保留，可在 Settings 中显式复制到 `Company` 分类的 Local Notes；迁移不删除旧数据并按固定 ID 去重。
 - JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1/V2/V3 备份仍可导入。Memos 远端数据和访问令牌不会进入导出文件。
@@ -64,7 +64,7 @@ Memos Server URL 可以填写实例根地址，也可以粘贴设置页链接；
 
 ## Radar 联网配置（可选）
 
-Settings 中可以配置 Tavily API Key、DeepSeek API Key 和 DeepSeek Model ID。供应商固定为 DeepSeek，API Base URL 固定在后端，前端不能覆盖。默认模型 ID 为 `deepseek-flash`；也支持符合 `deepseek-*` 命名规则的模型，最终可用性由 DeepSeek 接口验证。
+Settings 中可以配置 Tavily API Key、DeepSeek API Key 和 DeepSeek Model ID。供应商固定为 DeepSeek，API Base URL 固定在后端，前端不能覆盖。默认模型 ID 为 `deepseek-flash`，当前该 ID 对应 DeepSeek V4.1 Flash；当前接口同时提供 `deepseek-v4-pro`。其他符合 `deepseek-*` 命名规则的模型仍会交由 DeepSeek 接口验证并返回明确错误。
 
 API Key 默认写入 `sessionStorage`。只有用户主动勾选“长期保存在此设备”后才会写入 `localStorage`；取消勾选会立即清除持久化密钥并只保留当前会话副本，“清除配置”会同时清理两个位置。模型名称单独保存，不属于秘密。
 

@@ -2,7 +2,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from server.app import app
+from server.app import app, parse_deepseek_json
 
 
 class RadarApiTests(unittest.TestCase):
@@ -40,6 +40,20 @@ class RadarApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("short", response.text)
         self.assertEqual(response.json()["detail"], "请求结构无效，请检查凭证、模型 ID 和 Profile 字段")
+
+    def test_deepseek_json_parser_accepts_common_wrappers(self):
+        expected = {"items": [{"title": "测试"}]}
+        self.assertEqual(parse_deepseek_json('{"items":[{"title":"测试"}]}'), expected)
+        self.assertEqual(parse_deepseek_json('```json\n{"items":[{"title":"测试"}]}\n```'), expected)
+        self.assertEqual(parse_deepseek_json('以下是结果：\n{"items":[{"title":"测试"}]}\n完成。'), expected)
+
+    def test_deepseek_json_parser_reports_empty_and_truncated_content(self):
+        with self.assertRaisesRegex(ValueError, "空内容"):
+            parse_deepseek_json("")
+        with self.assertRaisesRegex(ValueError, "长度上限"):
+            parse_deepseek_json('{"items": [', "length")
+        with self.assertRaisesRegex(ValueError, "完整的 JSON"):
+            parse_deepseek_json('{"items": [')
 
 
 if __name__ == "__main__":

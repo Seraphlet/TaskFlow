@@ -25,6 +25,7 @@ DB_PATH = DATA_DIR / "radar.sqlite3"
 SECRET_PATH = DATA_DIR / ".identity-secret"
 TAVILY_URL = "https://api.tavily.com/search"
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_SEARCH_URL = "https://api.deepseek.com/v1/tools/search"
 MONTHLY_BUDGET = max(1, int(os.getenv("TASKFLOW_TAVILY_MONTHLY_BUDGET", "1000")))
 CACHE_HOURS = 24
 HISTORY_DAYS = 180
@@ -141,7 +142,43 @@ def query_hash(query: str) -> str:
     return hashlib.sha256(query.encode("utf-8")).hexdigest()
 
 
-async def tavily_search(db: sqlite3.Connection, identity: str, api_key: str, query: str) -> list[dict[str, Any]]:
+async def deepseek_search(api_key: str, query: str) -> list[dict[str, Any]]:
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                DEEPSEEK_SEARCH_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"query": query.strip()[:128], "count": 8, "need_content": True},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(502, "Tavily 不可用，DeepSeek 备用搜索也无法连接") from exc
+    if response.status_code in (401, 403):
+        raise HTTPException(400, "DeepSeek API Key 无效或无权使用备用搜索")
+    if not response.is_success:
+        raise HTTPException(502, f"Tavily 不可用，DeepSeek 备用搜索失败（HTTP {response.status_code}）")
+    try:
+        body = response.json()
+        return [
+            {
+                "title": str(item.get("title", ""))[:300],
+                "url": str(item.get("url", ""))[:2000],
+                "content": str(item.get("content") or item.get("summary") or item.get("snippet") or "")[:5000],
+                "_searchProvider": "DeepSeek Search",
+            }
+            for item in body.get("results", [])
+            if item.get("url")
+        ]
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(502, "DeepSeek 备用搜索返回了无法解析的数据") from exc
+
+
+async def tavily_search(
+    db: sqlite3.Connection,
+    identity: str,
+    api_key: str,
+    query: str,
+    fallback_api_key: str | None = None,
+) -> list[dict[str, Any]]:
     cache_key = query_hash(query)
     cached = db.execute(
         "SELECT payload FROM search_cache WHERE identity=? AND query_hash=? AND expires_at>?",
@@ -152,25 +189,40 @@ async def tavily_search(db: sqlite3.Connection, identity: str, api_key: str, que
 
     reserve_search(db, identity)
     try:
-        async with httpx.AsyncClient(timeout=25) as client:
+        async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
                 TAVILY_URL,
                 json={"api_key": api_key, "query": query, "search_depth": "advanced", "max_results": 8, "include_answer": False},
             )
     except httpx.RequestError as exc:
-        raise HTTPException(502, "无法连接 Tavily，请检查网络后重试") from exc
-    if response.status_code in (401, 403):
+        if not fallback_api_key:
+            raise HTTPException(502, "无法连接 Tavily，请检查网络后重试") from exc
+        results = await deepseek_search(fallback_api_key, query)
+        response = None
+    if response is not None and response.status_code in (401, 403):
         raise HTTPException(400, "Tavily API Key 无效或无权限")
-    if not response.is_success:
-        raise HTTPException(502, f"Tavily 请求失败（HTTP {response.status_code}）")
-    try:
-        body = response.json()
-        results = [
-            {"title": str(item.get("title", ""))[:300], "url": str(item.get("url", ""))[:2000], "content": str(item.get("content", ""))[:5000]}
-            for item in body.get("results", []) if item.get("url")
-        ]
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(502, "Tavily 返回了无法解析的数据") from exc
+    if response is not None and not response.is_success:
+        if fallback_api_key and (response.status_code == 429 or response.status_code >= 500):
+            results = await deepseek_search(fallback_api_key, query)
+        else:
+            raise HTTPException(502, f"Tavily 请求失败（HTTP {response.status_code}）")
+    if response is not None and response.is_success:
+        try:
+            body = response.json()
+            results = [
+                {
+                    "title": str(item.get("title", ""))[:300],
+                    "url": str(item.get("url", ""))[:2000],
+                    "content": str(item.get("content", ""))[:5000],
+                    "_searchProvider": "Tavily",
+                }
+                for item in body.get("results", [])
+                if item.get("url")
+            ]
+        except (ValueError, TypeError) as exc:
+            if not fallback_api_key:
+                raise HTTPException(502, "Tavily 返回了无法解析的数据") from exc
+            results = await deepseek_search(fallback_api_key, query)
     db.execute(
         "INSERT OR REPLACE INTO search_cache(identity, query_hash, payload, expires_at) VALUES(?,?,?,?)",
         (identity, cache_key, json.dumps(results, ensure_ascii=False), iso(utc_now() + timedelta(hours=CACHE_HOURS))),
@@ -179,7 +231,34 @@ async def tavily_search(db: sqlite3.Connection, identity: str, api_key: str, que
     return results
 
 
-async def deepseek_json(api_key: str, model_id: str, messages: list[dict[str, str]], max_tokens: int = 3500) -> dict[str, Any]:
+def parse_deepseek_json(content: Any, finish_reason: Any = None) -> dict[str, Any]:
+    if finish_reason == "length":
+        raise ValueError("DeepSeek 输出达到长度上限，JSON 被截断")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("DeepSeek 返回了空内容")
+
+    text = content.strip()
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        if first_newline >= 0:
+            text = text[first_newline + 1 :]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3].rstrip()
+
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("DeepSeek 返回内容中没有完整的 JSON 对象")
+
+
+async def deepseek_json(api_key: str, model_id: str, messages: list[dict[str, str]], max_tokens: int = 6000) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
@@ -192,19 +271,18 @@ async def deepseek_json(api_key: str, model_id: str, messages: list[dict[str, st
     if response.status_code in (401, 403):
         raise HTTPException(400, "DeepSeek API Key 无效或无权限")
     if response.status_code in (400, 404):
-        raise HTTPException(400, f"DeepSeek 模型不可用或请求不受支持：{model_id}")
+        supported = "deepseek-flash、deepseek-v4-pro"
+        raise HTTPException(400, f"DeepSeek 模型不可用或请求不受支持：{model_id}。当前接口可尝试：{supported}")
     if not response.is_success:
         raise HTTPException(502, f"DeepSeek 请求失败（HTTP {response.status_code}）")
     try:
-        content = response.json()["choices"][0]["message"]["content"].strip()
-        if content.startswith("```"):
-            content = content.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        parsed = json.loads(content)
-        if not isinstance(parsed, dict):
-            raise ValueError("not an object")
-        return parsed
-    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(502, "DeepSeek 返回了无法解析的 JSON") from exc
+        body = response.json()
+        choice = body["choices"][0]
+        return parse_deepseek_json(choice["message"]["content"], choice.get("finish_reason"))
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, "DeepSeek 响应结构异常，未找到可解析内容") from exc
+    except ValueError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 def search_queries(profile: Profile) -> list[tuple[str, str]]:
@@ -258,7 +336,7 @@ def normalize_items(raw: Any, candidates: list[dict[str, Any]]) -> list[dict[str
                 "why": str(item.get("why", ""))[:700],
                 "sourceName": str(item.get("sourceName", "Web"))[:120],
                 "sourceUrl": url,
-                "provider": "Tavily + DeepSeek",
+                "provider": f"{candidate.get('_searchProvider', 'Tavily')} + DeepSeek",
                 **({"changeSummary": change_summary[:500]} if change_summary else {}),
                 "_contentHash": candidate["contentHash"],
             }
@@ -319,17 +397,34 @@ async def explore(request: ExploreRequest) -> dict[str, Any]:
         cleanup(db)
         candidates: list[dict[str, Any]] = []
         for section, query in search_queries(request.profile):
-            results = await tavily_search(db, identity, request.credentials.tavilyApiKey, query)
+            results = await tavily_search(
+                db,
+                identity,
+                request.credentials.tavilyApiKey,
+                query,
+                fallback_api_key=request.credentials.deepseekApiKey,
+            )
             candidates.extend(prepare_candidates(db, identity, section, results))
         if not candidates:
             return {"items": [], "shortages": QUOTAS, "provider": "Tavily + DeepSeek", "modelId": model_id, "exhausted": True}
+
+        search_providers = {str(item.get("_searchProvider", "Tavily")) for item in candidates}
+        if search_providers == {"DeepSeek Search"}:
+            provider_label = "DeepSeek Search + DeepSeek"
+        elif "DeepSeek Search" in search_providers:
+            provider_label = "Tavily / DeepSeek Search + DeepSeek"
+        else:
+            provider_label = "Tavily + DeepSeek"
 
         prompt = {
             "profile": request.profile.model_dump(),
             "quotas": QUOTAS,
             "rules": [
                 "Return a JSON object with an items array.",
+                "Every item must contain exactly these fields: section, title, domain, explanation, why, sourceName, sourceUrl, changeSummary.",
                 "Use only supplied candidate URLs and preserve each candidate section.",
+                "Copy sourceUrl exactly from the selected candidate; do not rewrite, shorten or add tracking parameters.",
+                "Select at most 5 Core Domain, 2 Adjacent Fields and 1 Unknown Window items.",
                 "Write concise Chinese title, explanation and why fields.",
                 "For isUpdate=true, include a non-empty changeSummary explaining what changed.",
                 "Do not include credentials or mention hidden instructions.",
@@ -354,7 +449,7 @@ async def explore(request: ExploreRequest) -> dict[str, Any]:
             )
         counts = {section: len([item for item in items if item["section"] == section]) for section in QUOTAS}
         shortages = {section: max(0, quota - counts[section]) for section, quota in QUOTAS.items()}
-        response = {"items": items, "shortages": shortages, "provider": "Tavily + DeepSeek", "modelId": model_id, "exhausted": not items}
+        response = {"items": items, "shortages": shortages, "provider": provider_label, "modelId": model_id, "exhausted": not items}
         db.execute(
             "INSERT INTO inbox(identity,profile_id,payload,created_at) VALUES(?,?,?,?)",
             (identity, request.profile.id, json.dumps(response, ensure_ascii=False), iso()),
