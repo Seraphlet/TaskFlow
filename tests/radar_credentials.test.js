@@ -27,15 +27,18 @@ const context = {
 };
 vm.runInNewContext(fs.readFileSync('js/radar.js', 'utf8'), context);
 
-const { RadarCredentialStore, RemoteRadarProvider } = context.window.TaskFlowRadar;
+const { RadarCredentialStore, RemoteRadarProvider, DEFAULT_DAILY_LIMIT } = context.window.TaskFlowRadar;
 const credentials = new RadarCredentialStore();
 credentials.save({ tavilyApiKey: 'tvly-session-secret', deepseekApiKey: 'sk-session-secret', modelId: 'deepseek-flash', remember: false });
 assert.strictEqual(sessionStorage.has('taskflow-tavily-api-key-v1'), true);
 assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), false);
+assert.strictEqual(credentials.getConfig().dailyLimit, DEFAULT_DAILY_LIMIT);
 
-credentials.save({ tavilyApiKey: 'tvly-persistent-secret', deepseekApiKey: 'sk-persistent-secret', modelId: 'deepseek-v4.1-flash', remember: true });
+credentials.save({ tavilyApiKey: 'tvly-persistent-secret', deepseekApiKey: 'sk-persistent-secret', modelId: 'deepseek-v4.1-flash', remember: true, dailyLimit: 7 });
 assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), true);
 assert.strictEqual(sessionStorage.has('taskflow-tavily-api-key-v1'), false);
+assert.strictEqual(credentials.getConfig().dailyLimit, 7);
+assert.throws(() => credentials.save({ tavilyApiKey:'tvly-x', deepseekApiKey:'deepseek-x', modelId:'deepseek-flash', remember:false, dailyLimit:0 }), /1–50/);
 
 credentials.useSessionOnly();
 assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), false);

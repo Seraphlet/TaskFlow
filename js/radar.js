@@ -1,6 +1,7 @@
 (() => {
   const QUOTAS = Object.freeze({ 'Core Domain': 5, 'Adjacent Fields': 2, 'Unknown Window': 1 });
   const DEFAULT_MODEL_ID = 'deepseek-flash';
+  const DEFAULT_DAILY_LIMIT = 3;
   const RADAR_CONFIG_KEY = 'taskflow-radar-provider-config-v1';
   const TAVILY_KEY = 'taskflow-tavily-api-key-v1';
   const DEEPSEEK_KEY = 'taskflow-deepseek-api-key-v1';
@@ -80,8 +81,8 @@
     getConfig() {
       try {
         const saved = JSON.parse(localStorage.getItem(RADAR_CONFIG_KEY));
-        return { provider:'DeepSeek', modelId:DEFAULT_MODEL_ID, remember:false, ...(saved || {}) };
-      } catch { return { provider:'DeepSeek', modelId:DEFAULT_MODEL_ID, remember:false }; }
+        return { provider:'DeepSeek', modelId:DEFAULT_MODEL_ID, remember:false, dailyLimit:DEFAULT_DAILY_LIMIT, ...(saved || {}) };
+      } catch { return { provider:'DeepSeek', modelId:DEFAULT_MODEL_ID, remember:false, dailyLimit:DEFAULT_DAILY_LIMIT }; }
     }
 
     getCredentials() {
@@ -99,8 +100,10 @@
       return value;
     }
 
-    save({ tavilyApiKey, deepseekApiKey, modelId, remember }) {
-      const config = { provider:'DeepSeek', modelId:this.validateModel(modelId), remember:Boolean(remember), updatedAt:new Date().toISOString() };
+    save({ tavilyApiKey, deepseekApiKey, modelId, remember, dailyLimit = DEFAULT_DAILY_LIMIT }) {
+      const parsedLimit = Number(dailyLimit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 50) throw new Error('单日搜索上限必须是 1–50 的整数');
+      const config = { provider:'DeepSeek', modelId:this.validateModel(modelId), remember:Boolean(remember), dailyLimit:parsedLimit, updatedAt:new Date().toISOString() };
       const tavily = String(tavilyApiKey || '').trim();
       const deepseek = String(deepseekApiKey || '').trim();
       if (!tavily || !deepseek) throw new Error('请同时填写 Tavily API Key 和 DeepSeek API Key');
@@ -161,7 +164,11 @@
         });
         const text = await response.text(); let body = null;
         try { body = text ? JSON.parse(text) : null; } catch { body = null; }
-        if (!response.ok) throw new Error(body?.detail || body?.message || `Radar 服务请求失败（HTTP ${response.status}）`);
+        if (!response.ok) {
+          const error = new Error(body?.detail || body?.message || `Radar 服务请求失败（HTTP ${response.status}）`);
+          error.status = response.status;
+          throw error;
+        }
         return body;
       } catch (error) {
         if (error.name === 'AbortError') throw new Error('Radar 请求超时，请稍后重试');
@@ -188,5 +195,5 @@
     return CATALOG.filter((item) => Number(item.id.split('_')[1]) < batchesSeen).map((item) => item.id);
   }
 
-  window.TaskFlowRadar = { DemoRadarProvider, RemoteRadarProvider, RadarCredentialStore, DEFAULT_MODEL_ID, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex };
+  window.TaskFlowRadar = { DemoRadarProvider, RemoteRadarProvider, RadarCredentialStore, DEFAULT_MODEL_ID, DEFAULT_DAILY_LIMIT, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex };
 })();

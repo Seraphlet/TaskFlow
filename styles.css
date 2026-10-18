@@ -228,6 +228,21 @@ tbody tr:last-child td { border-bottom: 0; }
 .radar-section { margin-top: 34px; }
 .radar-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .radar-empty { padding: 28px; border: 1px dashed #cfd7dd; border-radius: 12px; color: var(--muted); text-align: center; font-size: 13px; }
+.radar-history { margin-top: 48px; padding-top: 28px; border-top: 1px solid var(--line); }
+.radar-history .section-title > div p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.radar-history-entry { margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); overflow: hidden; }
+.radar-history-entry summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px; cursor: pointer; list-style: none; }
+.radar-history-entry summary::-webkit-details-marker { display: none; }
+.radar-history-entry summary > span:first-child { display: grid; gap: 3px; }
+.radar-history-entry summary small { color: var(--muted); font-weight: 500; }
+.radar-history-entry summary > span:last-child { color: var(--blue); font-size: 12px; }
+.radar-history-body { padding: 0 16px 16px; border-top: 1px solid var(--line); }
+.radar-history-items { display: grid; gap: 10px; margin-top: 12px; }
+.radar-history-items article { padding: 13px 14px; border-radius: 10px; background: #f6f7f5; }
+.radar-history-items article > div { display: flex; justify-content: space-between; gap: 12px; }
+.radar-history-items article small { color: var(--muted); }
+.radar-history-items article p { margin: 7px 0; color: var(--muted); line-height: 1.55; }
+.radar-history-items article a { color: var(--blue); font-size: 12px; text-decoration: none; }
 .radar-card { position: relative; display: flex; flex-direction: column; min-height: 305px; padding: 24px; overflow: hidden; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
 .radar-card:hover { transform: translateY(-3px); border-color: #ccd2ce; box-shadow: 0 18px 38px rgba(26,38,34,.075); }
 .radar-card-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
