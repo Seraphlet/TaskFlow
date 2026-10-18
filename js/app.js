@@ -25,6 +25,10 @@ async function loadData() {
   await storage.init();
   const entries = await Promise.all(STORES.map(async (name) => [name, await storage.all(name)]));
   state.data = Object.fromEntries(entries);
+  // A cached pre-V5 storage adapter does not know about radarHistory. Keep the
+  // page usable while the versioned assets below force the matching adapter on
+  // the next load; existing IndexedDB records are never replaced here.
+  state.data.radarHistory = Array.isArray(state.data.radarHistory) ? state.data.radarHistory : [];
   await loadNotes();
   await loadRadar();
 }
@@ -57,7 +61,7 @@ async function loadRadar() {
   const preexistingBatches = [...state.data.radarBatches];
   state.radarProfiles = [...state.data.radarProfiles];
   state.radarBatches = [...state.data.radarBatches];
-  state.radarHistory = [...state.data.radarHistory];
+  state.radarHistory = [...(state.data.radarHistory || [])];
   const interrupted=state.radarHistory.filter((entry)=>entry.status==='searching').map((entry)=>({...entry,status:'error',message:'页面在本次搜索完成前关闭或刷新；可再次探索，后端已完成的结果会自动恢复。',completedAt:timestamp}));
   if(interrupted.length) {
     await storage.putMany('radarHistory',interrupted);

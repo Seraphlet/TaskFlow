@@ -2,6 +2,13 @@ const assert = require('assert');
 const fs = require('fs');
 const vm = require('vm');
 
+const indexHtml = fs.readFileSync('index.html', 'utf8');
+for (const asset of ['styles.css', 'storage.js', 'notifications.js', 'notes.js', 'radar.js', 'app.js']) {
+  assert.match(indexHtml, new RegExp(`${asset.replace('.', '\\.') }\\?v=`), `${asset} should use a cache-busting version`);
+}
+const appSource = fs.readFileSync('js/app.js', 'utf8');
+assert.match(appSource, /Array\.isArray\(state\.data\.radarHistory\)/, 'stale schemas should fall back to an empty Radar history');
+
 function storage() {
   const values = new Map();
   return {
