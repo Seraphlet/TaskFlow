@@ -41,6 +41,11 @@ credentials.useSessionOnly();
 assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), false);
 assert.strictEqual(sessionStorage.has('taskflow-tavily-api-key-v1'), true);
 
+credentials.rememberSessionDraft({ tavilyApiKey: 'tvly-typed-draft', deepseekApiKey: 'sk-typed-draft' });
+assert.strictEqual(credentials.getCredentials().tavilyApiKey, 'tvly-typed-draft');
+assert.strictEqual(credentials.getCredentials().deepseekApiKey, 'sk-typed-draft');
+assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), false);
+
 (async () => {
   await new RemoteRadarProvider({ tavilyApiKey: 'tvly-header-or-body-only', deepseekApiKey: 'sk-header-or-body-only', modelId: 'deepseek-flash' }).testConnection();
   assert.strictEqual(request.url, '/api/radar/test');

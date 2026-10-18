@@ -288,13 +288,13 @@ function settingsPage() {
         <div class="warning">从 file:// 连接远程 Memos 可能被 CORS / Origin: null 策略拒绝。不会要求关闭浏览器安全功能，也不会使用第三方代理。</div>
       </article>
       <article class="card setting-card notes-storage-card"><div class="setting-card-head"><div><h4>Radar 联网服务</h4><p class="subtle">搜索优先使用 Tavily，服务异常时自动切换 DeepSeek Search；模型供应商固定为 DeepSeek。</p></div><span class="setting-value ${radarConfigured ? 'ready' : 'muted'}">${radarConfigured ? 'Configured' : 'Not Configured'}</span></div>
-        <div class="field"><label>Tavily API Key</label><div class="secret-field"><input class="input" id="tavily-key" type="password" autocomplete="off" placeholder="${radarKeys.tavilyApiKey ? '已保存；留空则保持不变' : 'tvly-…'}"><button class="btn small" type="button" data-toggle-secret="tavily-key" aria-label="显示 Tavily API Key">显示</button></div></div>
-        <div class="field"><label>DeepSeek API Key</label><div class="secret-field"><input class="input" id="deepseek-key" type="password" autocomplete="off" placeholder="${radarKeys.deepseekApiKey ? '已保存；留空则保持不变' : 'sk-…'}"><button class="btn small" type="button" data-toggle-secret="deepseek-key" aria-label="显示 DeepSeek API Key">显示</button></div></div>
+        <div class="field"><label>Tavily API Key</label><div class="secret-field"><input class="input" id="tavily-key" type="password" autocomplete="off" value="${esc(radarKeys.tavilyApiKey)}" placeholder="tvly-…"><button class="btn small" type="button" data-toggle-secret="tavily-key" aria-label="显示 Tavily API Key">显示</button></div></div>
+        <div class="field"><label>DeepSeek API Key</label><div class="secret-field"><input class="input" id="deepseek-key" type="password" autocomplete="off" value="${esc(radarKeys.deepseekApiKey)}" placeholder="sk-…"><button class="btn small" type="button" data-toggle-secret="deepseek-key" aria-label="显示 DeepSeek API Key">显示</button></div></div>
         <div class="field"><label>DeepSeek Model ID</label><input class="input" id="deepseek-model" maxlength="64" value="${esc(radarConfig.modelId || DEFAULT_MODEL_ID)}" placeholder="${DEFAULT_MODEL_ID}"><div class="field-hint">模型名称会独立保存且不属于秘密；仅接受 deepseek- 开头的模型 ID。</div></div>
         <label class="check-row"><input id="remember-radar-keys" type="checkbox" ${radarConfig.remember ? 'checked':''}> 长期保存在此设备（默认关闭；取消后保存会清除原有持久化密钥）</label>
         <div class="import-box"><button class="btn" data-test-radar>测试连接</button><button class="btn primary" data-save-radar-config>保存配置</button><button class="btn danger" data-clear-radar-config>清除配置</button></div>
         <div id="radar-test-status" class="field-hint">${state.radarTest ? esc(state.radarTest) : radarConfigured ? `已配置 DeepSeek · ${esc(radarConfig.modelId || DEFAULT_MODEL_ID)}。测试成功后再开始真实探索。` : '未配置时 Radar 保持 Demo 模式。'}</div>
-        <div class="warning">密钥默认只保留在当前浏览器会话。长期保存会增加共享设备、同源脚本与 XSS 风险；密钥不会进入 URL、TaskFlow JSON 备份或服务端持久化数据。</div>
+        <div class="warning">密码框中的黑点表示当前会话或本设备已有密钥。未勾选长期保存时，密钥只保留到当前页面会话结束；长期保存会增加共享设备、同源脚本与 XSS 风险。密钥不会进入 URL、TaskFlow JSON 备份或服务端持久化数据。</div>
       </article>
       ${teamSettings()}
       <article class="card setting-card"><h4>旧版公司墙兼容</h4><p class="subtle">原 companies / comments 数据仍完整保留。可复制为 Local Notes；旧数据不会被删除，重复迁移会按固定 ID 跳过。</p><div class="setting-row"><span>旧版留言</span><b>${legacyCount} 条</b></div><div class="import-box"><button class="btn" data-open-legacy-wall>打开旧版公司墙</button><button class="btn" data-migrate-legacy ${legacyCount ? '' : 'disabled'}>复制到 Local Notes</button></div></article>
@@ -446,7 +446,8 @@ async function testRadarConnection() {
     const result = await new RemoteRadarProvider(draft).testConnection();
     state.radarTest = `连接成功：Tavily 可用，DeepSeek 模型 ${result.modelId || draft.modelId} 可用。`;
     if (status) status.textContent = state.radarTest;
-    toast('Radar 联网连接测试成功；点击保存配置后启用');
+    radarCredentials.rememberSessionDraft(draft);
+    toast('Radar 联网连接测试成功；密钥已保留在当前会话，点击保存可确认长期保存选项');
   } catch (error) {
     state.radarTest = `测试失败：${error.message}`;
     if (status) status.textContent = state.radarTest;
@@ -574,7 +575,16 @@ app.addEventListener('click', async (e) => {
 });
 
 app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'||e.target.id==='note-editor-form'){e.preventDefault();try{if(e.target.id==='drawer-form')await onSubmit(e.target);else await saveNoteForm(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
-app.addEventListener('input', (e) => { if(['task-search','company-search','note-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);} });
+app.addEventListener('input', (e) => {
+  if(['task-search','company-search','note-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+  if(['tavily-key','deepseek-key'].includes(e.target.id)) {
+    radarCredentials.rememberSessionDraft({
+      tavilyApiKey:document.querySelector('#tavily-key')?.value,
+      deepseekApiKey:document.querySelector('#deepseek-key')?.value
+    });
+    state.radarTest=null;
+  }
+});
 app.addEventListener('change', async (e) => { if(e.target.id==='status-filter'){state.status=e.target.value;render();} if(e.target.id==='note-category-filter'){state.selectedCategory=e.target.value;state.noteId=null;render();} if(e.target.id==='radar-profile-select'){selectRadarProfile(e.target.value);render();} if(e.target.id==='remember-radar-keys'&&!e.target.checked){radarCredentials.useSessionOnly();toast('已清除长期保存的 Radar 密钥；当前会话仍可继续使用');} if(e.target.id==='handoff-to'){const member=state.data.team.find((m)=>m.id===e.target.value);const hint=document.querySelector('#handoff-confirm');if(hint)hint.textContent=member?`确认后负责人将更新为 ${member.name}；任务状态保持不变，并保存当前快照。`:'请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。';} if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});
 

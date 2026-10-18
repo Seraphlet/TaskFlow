@@ -112,6 +112,14 @@
       return config;
     }
 
+    rememberSessionDraft({ tavilyApiKey, deepseekApiKey }) {
+      const tavily = String(tavilyApiKey || '').trim();
+      const deepseek = String(deepseekApiKey || '').trim();
+      if (tavily) sessionStorage.setItem(TAVILY_KEY, tavily);
+      if (deepseek) sessionStorage.setItem(DEEPSEEK_KEY, deepseek);
+      return this.getCredentials();
+    }
+
     useSessionOnly() {
       const credentials = this.getCredentials(); const config = this.getConfig();
       localStorage.removeItem(TAVILY_KEY); localStorage.removeItem(DEEPSEEK_KEY);
