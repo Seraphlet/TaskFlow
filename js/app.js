@@ -20,6 +20,7 @@ const state = { route: 'home', taskId: null, noteId: null, noteDraft: null, note
 let noteDraftTimer = null;
 let noteDraftWrite = Promise.resolve();
 let appLoaded = false;
+let homeClockTimer = null;
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
@@ -167,7 +168,8 @@ function toast(message, type = '') {
 }
 
 function shell(content, title, subtitle) {
-  return `<div class="app-shell">
+  const homeClass = state.route === 'home' ? ' home-shell' : '';
+  return `<div class="app-shell${homeClass}">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div><div><h1>TaskFlow</h1><small>个人工作台</small></div></div>
       <div class="nav-kicker">工作空间</div>
@@ -189,6 +191,49 @@ function navButton(route, icon, label) {
   return `<button class="nav-btn ${active}" data-nav="${route}"><span class="nav-icon">${icon}</span>${label}</button>`;
 }
 
+function homeDateParts(value = new Date()) {
+  return {
+    day:String(value.getDate()).padStart(2,'0'),
+    month:new Intl.DateTimeFormat('zh-CN',{month:'long'}).format(value),
+    weekday:new Intl.DateTimeFormat('zh-CN',{weekday:'long'}).format(value),
+    year:String(value.getFullYear()),
+    date:`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`,
+    iso:value.toISOString(),
+  };
+}
+
+function updateHomeTime() {
+  if (state.route !== 'home') return;
+  const current = new Date();
+  const clock = document.querySelector('#home-clock');
+  const date = homeDateParts(current);
+  if (clock) {
+    clock.textContent = new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(current);
+    clock.dateTime = date.iso;
+  }
+  const day = document.querySelector('[data-home-date-day]');
+  const month = document.querySelector('[data-home-date-month]');
+  const weekday = document.querySelector('[data-home-date-weekday]');
+  const year = document.querySelector('[data-home-date-year]');
+  const dateCard = document.querySelector('[data-home-date]');
+  if (day) day.textContent = date.day;
+  if (month) month.textContent = date.month;
+  if (weekday) weekday.textContent = date.weekday;
+  if (year) year.textContent = date.year;
+  if (dateCard) dateCard.dateTime = date.date;
+}
+
+function stopHomeClock() {
+  if (homeClockTimer) clearInterval(homeClockTimer);
+  homeClockTimer = null;
+}
+
+function startHomeClock() {
+  stopHomeClock();
+  updateHomeTime();
+  homeClockTimer = setInterval(updateHomeTime, 1000);
+}
+
 function homePage() {
   const tasks = [...state.data.tasks].sort((a,b) => String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
   const focusTask = tasks.find((task) => task.status === 'Doing') || tasks.find((task) => task.status === 'Blocked') || tasks.find((task) => task.status === 'Todo');
@@ -196,14 +241,17 @@ function homePage() {
   const recentNotes = [...state.notes].sort((a,b) => String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).slice(0, 3);
   const radarBatch = activeRadarBatch();
   const radarItems = (radarBatch?.items || []).slice(0, 2);
+  const today = homeDateParts();
   const focusContent = focusTask ? `<span class="home-card-kicker">当前焦点</span><div class="home-focus-title"><h3>${esc(focusTask.title)}</h3>${badge(focusTask.status)}</div><p class="prose">${esc(focusTask.next || focusTask.requirement || '暂未设置下一步')}</p><button class="btn dark" data-task="${esc(focusTask.id)}">打开任务 →</button>` : `<span class="home-card-kicker">当前焦点</span><h3>从一件具体的事开始</h3><p>还没有待推进的任务。创建任务后，这里会显示真实的下一步。</p><button class="btn dark" data-open="new-task">＋ 新建任务</button>`;
   return shell(`<section class="page home-page">
-    <header class="home-heading"><div><span class="eyebrow">PERSONAL WORKSPACE</span><h3>今天，把重要的事放在眼前</h3><p>任务、记录与探索都来自现有本地数据，不额外请求服务。</p></div><time>${new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(new Date())}</time></header>
+    <header class="home-heading"><div><span class="eyebrow">PERSONAL WORKSPACE</span><h3>今天，把重要的事放在眼前</h3><p>任务、记录与探索都来自现有本地数据，不额外请求服务。</p></div><time class="home-clock" id="home-clock" datetime="${today.iso}" aria-label="当前本地时间">00:00:00</time></header>
     <div class="home-bento">
-      <article class="home-card home-focus">${focusContent}</article>
-      <article class="home-card home-tasks"><div class="home-card-head"><div><span class="home-card-kicker">任务节奏</span><h4>${tasks.length} 个任务</h4></div><button class="home-link" data-nav="tasks">查看全部 →</button></div><div class="home-task-counts">${STATUS.map((status)=>`<div><b>${taskCounts[status]}</b><span>${STATUS_LABELS[status]}</span></div>`).join('')}</div></article>
-      <article class="home-card home-notes"><div class="home-card-head"><div><span class="home-card-kicker">最近记录</span><h4>${state.notesMode} Notes</h4></div><button class="home-link" data-nav="notes">打开笔记 →</button></div>${recentNotes.length?`<div class="home-note-list">${recentNotes.map((note)=>`<button data-open-note="${esc(note.id)}"><b>${esc(note.title || note.content?.split(/\n/)[0]?.slice(0,40) || '未命名记录')}</b><span>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span></button>`).join('')}</div>`:'<p class="home-empty">还没有记录，随手写下第一条想法。</p>'}</article>
-      <article class="home-card home-radar"><div class="home-card-head"><div><span class="home-card-kicker">探索窗口</span><h4>${esc(activeRadarProfile()?.name || '探索雷达')}</h4></div><button class="home-link" data-nav="radar">进入 Radar →</button></div>${radarItems.length?`<div class="home-radar-list">${radarItems.map((item)=>`<div><span>${esc(item.section)}</span><b>${esc(item.title)}</b></div>`).join('')}</div>`:'<p class="home-empty">当前方向还没有可展示的探索内容。</p>'}</article>
+      <article class="home-card home-card-interactive home-focus">${focusContent}</article>
+      <article class="home-card home-date" aria-label="今日日期"><span class="home-card-kicker">今日日期</span><time data-home-date datetime="${today.date}"><strong data-home-date-day>${today.day}</strong><span><b data-home-date-weekday>${today.weekday}</b><small><i data-home-date-month>${today.month}</i> · <i data-home-date-year>${today.year}</i></small></span></time></article>
+      <article class="home-card home-card-interactive home-tasks"><div class="home-card-head"><div><span class="home-card-kicker">任务节奏</span><h4>${tasks.length} 个任务</h4></div><button class="home-link" data-nav="tasks">查看全部 →</button></div><div class="home-task-counts">${STATUS.map((status)=>`<div><b>${taskCounts[status]}</b><span>${STATUS_LABELS[status]}</span></div>`).join('')}</div></article>
+      <article class="home-card home-card-interactive home-notes"><div class="home-card-head"><div><span class="home-card-kicker">最近记录</span><h4>${state.notesMode} Notes</h4></div><button class="home-link" data-nav="notes">打开笔记 →</button></div>${recentNotes.length?`<div class="home-note-list">${recentNotes.map((note)=>`<button data-open-note="${esc(note.id)}"><b>${esc(note.title || note.content?.split(/\n/)[0]?.slice(0,40) || '未命名记录')}</b><span>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span></button>`).join('')}</div>`:'<p class="home-empty">还没有记录，随手写下第一条想法。</p>'}</article>
+      <article class="home-card home-card-interactive home-radar"><div class="home-card-head"><div><span class="home-card-kicker">探索窗口</span><h4>${esc(activeRadarProfile()?.name || '探索雷达')}</h4></div><button class="home-link" data-nav="radar">进入 Radar →</button></div>${radarItems.length?`<div class="home-radar-list">${radarItems.map((item)=>`<div><span>${esc(item.section)}</span><b>${esc(item.title)}</b></div>`).join('')}</div>`:'<p class="home-empty">当前方向还没有可展示的探索内容。</p>'}</article>
+      <article class="home-card home-card-interactive home-actions"><div><span class="home-card-kicker">快捷操作</span><h4>直接开始</h4></div><div class="home-action-list"><button data-open="new-task"><span>＋</span>新建任务</button><button data-new-note><span>✎</span>写笔记</button><button data-nav="radar"><span>⌁</span>打开 Radar</button></div></article>
     </div>
   </section>`, '首页', '本地工作台 · 不主动联网');
 }
@@ -495,6 +543,7 @@ function renderDrawer() {
 }
 
 function render() {
+  stopHomeClock();
   if (state.route === 'home') app.innerHTML = homePage();
   if (state.route === 'radar') app.innerHTML = radarPage();
   if (state.route === 'tasks') app.innerHTML = taskList();
@@ -502,6 +551,7 @@ function render() {
   if (state.route === 'notes') app.innerHTML = notesPage();
   if (state.route === 'categories') app.innerHTML = categoriesPage();
   if (state.route === 'settings') app.innerHTML = settingsPage();
+  if (state.route === 'home') startHomeClock();
 }
 
 function openDrawer(type, id = null) { state.drawer = { type, id }; render(); }

@@ -38,6 +38,17 @@ class RadarApiTests(unittest.TestCase):
         self.assertIn("TaskFlow Workspace", self.client.get("/").text)
         self.assertEqual(self.client.get("/js/app.js").status_code, 200)
 
+    def test_home_background_supports_cache_revalidation(self):
+        first = self.client.get("/images/home-background.webp")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.headers["cache-control"], "public, max-age=0, must-revalidate")
+        self.assertEqual(first.headers["content-type"], "image/webp")
+        self.assertIn("etag", first.headers)
+        self.assertIn("last-modified", first.headers)
+        second = self.client.get("/images/home-background.webp", headers={"If-None-Match": first.headers["etag"]})
+        self.assertEqual(second.status_code, 304)
+        self.assertEqual(second.content, b"")
+
     def test_server_files_are_not_public(self):
         self.assertEqual(self.client.get("/server/data/.identity-secret").status_code, 404)
         self.assertEqual(self.client.get("/.git/config").status_code, 404)

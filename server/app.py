@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import os
 import secrets
 import sqlite3
@@ -19,6 +20,8 @@ from pydantic import BaseModel, Field
 
 from .security import content_fingerprint, credential_identity, stable_item_id, validate_model_id
 
+
+mimetypes.add_type("image/webp", ".webp")
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.getenv("TASKFLOW_RADAR_DATA_DIR", ROOT / "server" / "data"))
@@ -41,6 +44,15 @@ INBOX_DAYS = 30
 MAX_SEARCHES_PER_EXPLORE = 3
 QUOTAS = {"Core Domain": 5, "Adjacent Fields": 2, "Unknown Window": 1}
 EXPLORE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Static assets that browsers may reuse after an HTTP revalidation."""
+
+    async def get_response(self, path: str, scope: dict[str, Any]):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+        return response
 
 
 class Credentials(BaseModel):
@@ -629,3 +641,4 @@ def frontend_styles() -> FileResponse:
 
 
 app.mount("/js", StaticFiles(directory=ROOT / "js"), name="javascript")
+app.mount("/images", RevalidatingStaticFiles(directory=ROOT / "images"), name="images")
