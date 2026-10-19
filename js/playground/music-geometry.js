@@ -4,10 +4,11 @@ const MAX_POINTS = 150;
 export function createArtwork(container) {
   container.innerHTML = `<section class="artwork artwork-music">
     <div class="artwork-toolbar">
-      <div class="artwork-status"><span class="artwork-mode" data-mode>演示信号 · 非音频分析</span><small data-file>尚未选择本地音乐</small></div>
+      <div class="artwork-status"><span class="artwork-mode" data-mode>演示信号 · 非音频分析</span><small data-file>尚未连接音频</small></div>
       <div class="artwork-controls">
-        <label class="btn artwork-file" for="music-file">选择本地音乐<input id="music-file" type="file" accept="audio/*"></label>
-        <button class="btn primary" type="button" data-play>暂停演示</button>
+        <button class="btn primary" type="button" data-capture>捕获音乐标签页</button>
+        <button class="btn" type="button" data-play>暂停演示</button>
+        <label class="btn artwork-file" for="music-file">备用：本地文件<input id="music-file" type="file" accept="audio/*"></label>
         <button class="btn" type="button" data-reset>重置画面</button>
       </div>
     </div>
@@ -16,12 +17,13 @@ export function createArtwork(container) {
       <div class="artwork-legend"><span><i class="legend-energy"></i>整体能量</span><span><i class="legend-low"></i>低频</span><span><i class="legend-change"></i>频谱变化</span></div>
       <div class="artwork-readout" aria-hidden="true"><span>E <b data-energy>0.00</b></span><span>L <b data-low>0.00</b></span><span>Δ <b data-flux>0.00</b></span></div>
     </div>
-    <p class="artwork-help" data-message>演示模式使用程序生成的虚拟信号。选择音频后，文件只在当前浏览器中解码与播放，不会上传。</p>
+    <p class="artwork-help" data-message>演示模式使用虚拟信号。点击“捕获音乐标签页”，在浏览器共享窗口中选择正在播放音乐的标签页，并勾选共享音频。</p>
   </section>`;
 
   const canvas = container.querySelector('canvas');
   const context = canvas.getContext('2d', { alpha: false });
   const fileInput = container.querySelector('#music-file');
+  const captureButton = container.querySelector('[data-capture]');
   const playButton = container.querySelector('[data-play]');
   const resetButton = container.querySelector('[data-reset]');
   const modeLabel = container.querySelector('[data-mode]');
@@ -36,7 +38,11 @@ export function createArtwork(container) {
   audio.preload = 'metadata';
   let audioContext = null;
   let analyser = null;
-  let sourceNode = null;
+  let activeSourceNode = null;
+  let fileSourceNode = null;
+  let captureStream = null;
+  let captureAudioTrack = null;
+  let captureRequestToken = 0;
   let frequencyData = null;
   let previousSpectrum = null;
   let objectUrl = '';
@@ -182,7 +188,7 @@ export function createArtwork(container) {
     const delta = Math.min(.05, Math.max(.001, (time - lastFrame) / 1000 || .016));
     lastFrame = time;
     if (mode === 'demo') demoSignal(time); else audioSignal();
-    const generating = mode === 'demo' || (!audio.paused && !audio.ended);
+    const generating = mode === 'demo' || mode === 'capture' || (mode === 'file' && !audio.paused && !audio.ended);
     const interval = 900 - signal.low * 570 - signal.flux * 180;
     if (generating && curves.length < MAX_CURVES && time - lastSpawn > Math.max(135, interval)) {
       curves.push(newCurve(time));
@@ -197,7 +203,7 @@ export function createArtwork(container) {
     readouts.energy.textContent = signal.energy.toFixed(2);
     readouts.low.textContent = signal.low.toFixed(2);
     readouts.flux.textContent = signal.flux.toFixed(2);
-    if (!generating && curves.length === 0 && mode === 'audio') {
+    if (!generating && curves.length === 0 && mode === 'file') {
       running = false; rafId = 0; playButton.textContent = '重新播放';
       message.textContent = '音乐已结束，最后的轨迹已经消散。可以重新播放或选择另一首本地音乐。';
       return;
@@ -217,27 +223,156 @@ export function createArtwork(container) {
     rafId = 0;
   }
 
-  async function ensureAudioGraph() {
-    if (audioContext) return;
+  async function ensureAudioContext() {
+    if (audioContext) return audioContext;
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) throw new Error('当前浏览器不支持 Web Audio API');
     audioContext = new AudioContextClass();
+    return audioContext;
+  }
+
+  function disconnectAnalysisGraph() {
+    if (activeSourceNode) {
+      try { activeSourceNode.disconnect(); } catch {}
+    }
+    if (analyser) {
+      try { analyser.disconnect(); } catch {}
+    }
+    activeSourceNode = null;
+    analyser = null;
+    frequencyData = null;
+    previousSpectrum = null;
+  }
+
+  function connectAnalysisSource(source, shouldOutput) {
+    disconnectAnalysisGraph();
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = .72;
-    sourceNode = audioContext.createMediaElementSource(audio);
-    sourceNode.connect(analyser);
-    analyser.connect(audioContext.destination);
+    source.connect(analyser);
+    // Captured tab audio is already audible in its source tab. Only local-file
+    // playback connects to destination, preventing duplicate sound or echo.
+    if (shouldOutput) analyser.connect(audioContext.destination);
+    activeSourceNode = source;
     frequencyData = new Uint8Array(analyser.frequencyBinCount);
     previousSpectrum = new Uint8Array(analyser.frequencyBinCount);
+  }
+
+  async function connectFileAnalysis() {
+    await ensureAudioContext();
+    if (!fileSourceNode) fileSourceNode = audioContext.createMediaElementSource(audio);
+    connectAnalysisSource(fileSourceNode, true);
+  }
+
+  function cleanupCaptureStream() {
+    if (captureAudioTrack) captureAudioTrack.removeEventListener('ended', onCaptureEnded);
+    if (captureStream) captureStream.getTracks().forEach((track) => track.stop());
+    captureAudioTrack = null;
+    captureStream = null;
+  }
+
+  function switchToDemo(statusText) {
+    cleanupCaptureStream();
+    disconnectAnalysisGraph();
+    mode = 'demo';
+    signal.energy = 0; signal.low = 0; signal.flux = 0;
+    modeLabel.textContent = '演示信号 · 非音频分析';
+    fileLabel.textContent = '尚未连接音频';
+    captureButton.disabled = false;
+    captureButton.textContent = '捕获音乐标签页';
+    playButton.textContent = userPaused ? '继续演示' : '暂停演示';
+    message.textContent = statusText;
+    if (!userPaused) startLoop();
+  }
+
+  function stopCapture(statusText = '已停止标签页音频捕获，画面回到虚拟信号演示。') {
+    captureRequestToken += 1;
+    switchToDemo(statusText);
+  }
+
+  function onCaptureEnded() {
+    if (destroyed || mode !== 'capture') return;
+    stopCapture('浏览器已结束共享，音频捕获已停止；画面已回到演示模式。');
+  }
+
+  async function beginCapture() {
+    if (mode === 'capture') { stopCapture(); return; }
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      message.textContent = '当前浏览器不支持标签页音频捕获。请使用最新版 Chrome 或 Edge，或使用本地文件备用入口。';
+      return;
+    }
+    const requestToken = ++captureRequestToken;
+    captureButton.disabled = true;
+    captureButton.textContent = '等待选择…';
+    message.textContent = '请选择正在播放音乐的浏览器标签页，并确认勾选“共享标签页音频”。';
+    let requestedStream = null;
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+        preferCurrentTab: false,
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'exclude',
+        systemAudio: 'include',
+      });
+      requestedStream = stream;
+      if (destroyed || requestToken !== captureRequestToken) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const audioTrack = stream.getAudioTracks()[0];
+      if (!audioTrack) {
+        stream.getTracks().forEach((track) => track.stop());
+        captureButton.disabled = false;
+        captureButton.textContent = '捕获音乐标签页';
+        message.textContent = '没有收到共享音频。请重新选择音乐标签页，并在共享窗口中勾选“共享标签页音频”。';
+        return;
+      }
+      audio.pause();
+      cleanupCaptureStream();
+      await ensureAudioContext();
+      if (audioContext.state === 'suspended') await audioContext.resume();
+      if (destroyed || requestToken !== captureRequestToken) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      captureStream = stream;
+      requestedStream = null;
+      captureAudioTrack = audioTrack;
+      captureAudioTrack.addEventListener('ended', onCaptureEnded, { once:true });
+      connectAnalysisSource(audioContext.createMediaStreamSource(stream), false);
+      mode = 'capture';
+      userPaused = false;
+      modeLabel.textContent = '标签页音频捕获';
+      fileLabel.textContent = audioTrack.label || '正在分析共享音频';
+      captureButton.disabled = false;
+      captureButton.textContent = '停止捕获';
+      playButton.textContent = '暂停画面';
+      message.textContent = '正在分析共享标签页的音频；捕获流不会连接到扬声器，因此不会产生重复声音或回声。';
+      reset();
+      startLoop();
+    } catch (error) {
+      if (requestedStream) requestedStream.getTracks().forEach((track) => track.stop());
+      if (destroyed || requestToken !== captureRequestToken) return;
+      captureButton.disabled = false;
+      captureButton.textContent = '捕获音乐标签页';
+      if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') message.textContent = '你取消了共享或未授予权限。浏览器不会在未确认的情况下捕获其他标签页。';
+      else message.textContent = `无法开始标签页音频捕获：${error?.message || '浏览器返回未知错误'}。可以改用本地文件。`;
+    }
   }
 
   async function play() {
     userPaused = false;
     if (mode === 'demo') { startLoop(); playButton.textContent = '暂停演示'; return; }
     try {
-      await ensureAudioGraph();
+      await ensureAudioContext();
       if (audioContext.state === 'suspended') await audioContext.resume();
+      if (mode === 'capture') {
+        startLoop();
+        playButton.textContent = '暂停画面';
+        return;
+      }
+      await connectFileAnalysis();
       if (audio.ended) audio.currentTime = 0;
       await audio.play();
       startLoop();
@@ -253,12 +388,13 @@ export function createArtwork(container) {
   function pause(markUser = true) {
     if (markUser) userPaused = true;
     stopLoop();
-    if (mode === 'audio') audio.pause();
-    playButton.textContent = mode === 'demo' ? '继续演示' : '继续播放';
+    if (mode === 'file') audio.pause();
+    if (mode === 'capture' && audioContext?.state === 'running') audioContext.suspend().catch(() => {});
+    playButton.textContent = mode === 'demo' ? '继续演示' : mode === 'capture' ? '继续分析' : '继续播放';
   }
 
   function togglePlay() {
-    if (running || (mode === 'audio' && !audio.paused)) pause(); else play();
+    if (running || (mode === 'file' && !audio.paused)) pause(); else play();
   }
 
   function reset() {
@@ -270,14 +406,19 @@ export function createArtwork(container) {
   function onFileChange() {
     const file = fileInput.files?.[0];
     if (!file) return;
+    captureRequestToken += 1;
+    cleanupCaptureStream();
+    disconnectAnalysisGraph();
     pause(false);
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = URL.createObjectURL(file);
     audio.src = objectUrl;
     audio.load();
-    mode = 'audio';
+    mode = 'file';
     modeLabel.textContent = '本地音频分析';
     fileLabel.textContent = file.name;
+    captureButton.disabled = false;
+    captureButton.textContent = '捕获音乐标签页';
     playButton.textContent = '播放音乐';
     message.textContent = '文件已就绪。点击播放后才会创建音频分析上下文；文件不会离开当前浏览器。';
     reset();
@@ -292,19 +433,21 @@ export function createArtwork(container) {
   function onVisibilityChange() {
     if (document.hidden) {
       hiddenResume = running && !userPaused;
-      audioWasPlaying = mode === 'audio' && !audio.paused;
+      audioWasPlaying = mode === 'file' && !audio.paused;
       stopLoop();
       if (audioWasPlaying) audio.pause();
+      if (mode === 'capture' && audioContext?.state === 'running') audioContext.suspend().catch(() => {});
       return;
     }
     if (!hiddenResume || destroyed) return;
     hiddenResume = false;
-    if (audioWasPlaying) play(); else startLoop();
+    if (audioWasPlaying || mode === 'capture') play(); else startLoop();
   }
 
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(canvas);
   fileInput.addEventListener('change', onFileChange);
+  captureButton.addEventListener('click', beginCapture);
   playButton.addEventListener('click', togglePlay);
   resetButton.addEventListener('click', reset);
   audio.addEventListener('ended', onEnded);
@@ -316,19 +459,20 @@ export function createArtwork(container) {
     pause() { pause(true); },
     destroy() {
       if (destroyed) return;
-      destroyed = true; stopLoop();
+      destroyed = true; captureRequestToken += 1; stopLoop();
       audio.pause(); audio.removeAttribute('src'); audio.load();
-      if (sourceNode) sourceNode.disconnect();
-      if (analyser) analyser.disconnect();
+      cleanupCaptureStream();
+      disconnectAnalysisGraph();
       if (audioContext && audioContext.state !== 'closed') audioContext.close().catch(() => {});
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       resizeObserver.disconnect();
       fileInput.removeEventListener('change', onFileChange);
+      captureButton.removeEventListener('click', beginCapture);
       playButton.removeEventListener('click', togglePlay);
       resetButton.removeEventListener('click', reset);
       audio.removeEventListener('ended', onEnded);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      curves.length = 0; frequencyData = null; previousSpectrum = null; sourceNode = null; analyser = null; audioContext = null;
+      curves.length = 0; frequencyData = null; previousSpectrum = null; activeSourceNode = null; fileSourceNode = null; analyser = null; audioContext = null;
       container.replaceChildren();
     },
   };

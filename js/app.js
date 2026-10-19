@@ -24,8 +24,8 @@ let homeClockTimer = null;
 let activeArtwork = null;
 let artworkLoadToken = 0;
 const PLAYGROUND_MODULES = {
-  music: './playground/music-geometry.js?v=20261019-playground-v1',
-  keyboard: './playground/keyboard-art.js?v=20261019-playground-v1',
+  music: './playground/music-geometry.js?v=20261019-playground-v1-1',
+  keyboard: './playground/keyboard-art.js?v=20261019-playground-v1-1',
 };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
@@ -283,11 +283,11 @@ function playgroundPage() {
     <div class="playground-grid">
       <article class="playground-card playground-card-music">
         <div class="playground-card-art" aria-hidden="true"><i></i><i></i><i></i><span>∿</span></div>
-        <div class="playground-card-copy"><span class="home-card-kicker">AUDIO × MATHEMATICS</span><h4>Music Geometry</h4><p>在清晰坐标系里，看波动、旋转和穿梭轨迹随音乐能量改变行为。音频只在浏览器本地使用。</p><ul><li>本地音频分析</li><li>三类动态曲线</li><li>无音乐演示模式</li></ul><button class="btn primary" type="button" data-playground-open="music">进入作品 →</button></div>
+        <div class="playground-card-copy"><span class="home-card-kicker">AUDIO × MATHEMATICS</span><h4>Music Geometry</h4><p>主动选择正在播放音乐的浏览器标签页，看波动、旋转和穿梭轨迹随共享音频改变行为。</p><ul><li>标签页音频捕获</li><li>三类动态曲线</li><li>本地文件备用</li></ul><button class="btn primary" type="button" data-playground-open="music">进入作品 →</button></div>
       </article>
       <article class="playground-card playground-card-keyboard">
         <div class="playground-card-art keyboard-preview" aria-hidden="true"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><kbd>F</kbd><span>✦</span></div>
-        <div class="playground-card-copy"><span class="home-card-kicker">KEYS × GENERATIVE ART</span><h4>Keyboard Art</h4><p>敲击 A–K，让不同规则生成光点、圆环、螺旋、花纹与丝线，并在时间里自然消散。</p><ul><li>8 种按键效果</li><li>受控随机变化</li><li>粒子数量保护</li></ul><button class="btn primary" type="button" data-playground-open="keyboard">进入作品 →</button></div>
+        <div class="playground-card-copy"><span class="home-card-kicker">KEYS × GENERATIVE ART</span><h4>Keyboard Art</h4><p>敲击 A–K，让不同规则生成光点、花纹与丝线，并以柔和的合成音效回应每次创作。</p><ul><li>8 种视听效果</li><li>静音与音量控制</li><li>粒子和声部保护</li></ul><button class="btn primary" type="button" data-playground-open="keyboard">进入作品 →</button></div>
       </article>
     </div>
     <p class="playground-footnote">作品模块不会在首页或此列表页预加载；离开作品后动画、音频和输入监听会停止。</p>

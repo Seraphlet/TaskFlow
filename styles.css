@@ -397,6 +397,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .artwork-controls .btn:hover { border-color: rgba(255,255,255,.32); background: rgba(255,255,255,.12); }
 .artwork-controls .btn.primary { border-color: var(--coral); color: white; background: var(--coral); }
 .artwork-file input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.artwork-volume { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 10px; color: #aebdd0; background: rgba(255,255,255,.05); font-size: 11px; font-weight: 700; }
+.artwork-volume input { width: 76px; accent-color: var(--coral); }
 .artwork-canvas-shell { position: relative; min-height: 500px; }
 .artwork-canvas-shell canvas { width: 100%; height: clamp(500px,calc(100vh - 290px),760px); display: block; background: #06101f; }
 .artwork-legend,.artwork-readout,.key-map { position: absolute; z-index: 2; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: rgba(5,13,26,.7); backdrop-filter: blur(8px); }
@@ -501,6 +503,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .artwork-toolbar { align-items: stretch; flex-direction: column; }
   .artwork-controls { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
   .artwork-controls .btn { width: 100%; }
+  .artwork-volume { width: 100%; justify-content: center; }
   .artwork-canvas-shell canvas { height: 500px; }
   .artwork-legend { display: none; }
   .key-map { width: calc(100% - 20px); overflow-x: auto; justify-content: flex-start; }
