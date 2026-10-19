@@ -16,11 +16,17 @@ const FIELD_LABELS = { status: '任务状态', currentSummary: '当前整体进�
 const CATEGORIES = ['AI Engineering', 'Company', 'Learning', 'Project', 'Personal'];
 const RADAR_ACTIVE_KEY = 'taskflow-radar-active-profile-v1';
 const NOTES_UI_KEY = 'taskflow-notes-ui-v1';
-const state = { route: 'home', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
+const state = { route: 'home', playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
 let noteDraftTimer = null;
 let noteDraftWrite = Promise.resolve();
 let appLoaded = false;
 let homeClockTimer = null;
+let activeArtwork = null;
+let artworkLoadToken = 0;
+const PLAYGROUND_MODULES = {
+  music: './playground/music-geometry.js?v=20261019-playground-v1',
+  keyboard: './playground/keyboard-art.js?v=20261019-playground-v1',
+};
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
@@ -179,6 +185,7 @@ function shell(content, title, subtitle) {
         ${navButton('notes','✎','随手笔记')}
         ${navButton('categories','◇','内容分类')}
         ${navButton('tasks','▣','任务管理')}
+        ${navButton('playground','✦','数字艺术')}
       </nav>
       <div class="local-note"><span class="storage-dot"></span><div><b>本地优先</b><small>Notes 数据源：${esc(state.notesMode)}</small></div><button class="sidebar-settings" data-nav="settings" aria-label="打开设置">⚙</button></div>
     </aside>
@@ -254,6 +261,65 @@ function homePage() {
       <article class="home-card home-card-interactive home-actions"><div><span class="home-card-kicker">快捷操作</span><h4>直接开始</h4></div><div class="home-action-list"><button data-open="new-task"><span>＋</span>新建任务</button><button data-new-note><span>✎</span>写笔记</button><button data-nav="radar"><span>⌁</span>打开 Radar</button></div></article>
     </div>
   </section>`, '首页', '本地工作台 · 不主动联网');
+}
+
+function playgroundPage() {
+  if (state.playgroundView === 'music' || state.playgroundView === 'keyboard') {
+    const isMusic = state.playgroundView === 'music';
+    const title = isMusic ? 'Music Geometry' : 'Keyboard Art';
+    const subtitle = isMusic ? '让声音推动曲线穿过坐标空间' : '用 A–K 键生成光线、粒子与数学花纹';
+    return shell(`<section class="page playground-page playground-work-page">
+      <div class="playground-work-head">
+        <button class="btn" type="button" data-playground-back>← 返回作品列表</button>
+        <div><span class="eyebrow">LIVE CANVAS</span><h3>${title}</h3><p>${subtitle}</p></div>
+      </div>
+      <div id="playground-mount" class="playground-mount" data-artwork="${state.playgroundView}">
+        <div class="playground-loading" role="status"><span></span><b>正在唤醒作品…</b><small>仅在此刻加载对应模块</small></div>
+      </div>
+    </section>`, 'Playground', `数字艺术实验室 · ${title}`);
+  }
+  return shell(`<section class="page playground-page">
+    <div class="page-head playground-intro"><div><span class="eyebrow">DIGITAL ART LAB</span><h3>让代码暂时离开效率</h3><p>两个独立的实时画布，只在你选择作品后加载和运行。</p></div><span class="playground-cold-badge">按需唤醒</span></div>
+    <div class="playground-grid">
+      <article class="playground-card playground-card-music">
+        <div class="playground-card-art" aria-hidden="true"><i></i><i></i><i></i><span>∿</span></div>
+        <div class="playground-card-copy"><span class="home-card-kicker">AUDIO × MATHEMATICS</span><h4>Music Geometry</h4><p>在清晰坐标系里，看波动、旋转和穿梭轨迹随音乐能量改变行为。音频只在浏览器本地使用。</p><ul><li>本地音频分析</li><li>三类动态曲线</li><li>无音乐演示模式</li></ul><button class="btn primary" type="button" data-playground-open="music">进入作品 →</button></div>
+      </article>
+      <article class="playground-card playground-card-keyboard">
+        <div class="playground-card-art keyboard-preview" aria-hidden="true"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><kbd>F</kbd><span>✦</span></div>
+        <div class="playground-card-copy"><span class="home-card-kicker">KEYS × GENERATIVE ART</span><h4>Keyboard Art</h4><p>敲击 A–K，让不同规则生成光点、圆环、螺旋、花纹与丝线，并在时间里自然消散。</p><ul><li>8 种按键效果</li><li>受控随机变化</li><li>粒子数量保护</li></ul><button class="btn primary" type="button" data-playground-open="keyboard">进入作品 →</button></div>
+      </article>
+    </div>
+    <p class="playground-footnote">作品模块不会在首页或此列表页预加载；离开作品后动画、音频和输入监听会停止。</p>
+  </section>`, 'Playground', '原生 Canvas · 本地运行 · 不保存作品数据');
+}
+
+function destroyActiveArtwork() {
+  artworkLoadToken += 1;
+  if (!activeArtwork) return;
+  try { activeArtwork.instance.destroy(); }
+  catch (error) { console.warn('Playground cleanup failed', error); }
+  activeArtwork = null;
+}
+
+async function mountArtwork(kind) {
+  const modulePath = PLAYGROUND_MODULES[kind];
+  const mount = document.querySelector('#playground-mount');
+  if (!modulePath || !mount) return;
+  const token = ++artworkLoadToken;
+  try {
+    const module = await import(modulePath);
+    if (token !== artworkLoadToken || state.route !== 'playground' || state.playgroundView !== kind || !mount.isConnected) return;
+    if (typeof module.createArtwork !== 'function') throw new Error('作品模块没有提供 createArtwork()');
+    const instance = module.createArtwork(mount);
+    if (!instance || ['start','pause','destroy'].some((method) => typeof instance[method] !== 'function')) throw new Error('作品生命周期接口不完整');
+    if (token !== artworkLoadToken || !mount.isConnected) { instance.destroy(); return; }
+    activeArtwork = { kind, instance };
+    instance.start();
+  } catch (error) {
+    if (token !== artworkLoadToken || !mount.isConnected) return;
+    mount.innerHTML = `<div class="playground-load-error"><b>作品暂时无法启动</b><p>${esc(error.message || '模块加载失败')}</p><button class="btn" type="button" data-playground-retry="${kind}">重试</button></div>`;
+  }
 }
 
 function taskList() {
@@ -544,6 +610,7 @@ function renderDrawer() {
 
 function render() {
   stopHomeClock();
+  destroyActiveArtwork();
   if (state.route === 'home') app.innerHTML = homePage();
   if (state.route === 'radar') app.innerHTML = radarPage();
   if (state.route === 'tasks') app.innerHTML = taskList();
@@ -551,7 +618,9 @@ function render() {
   if (state.route === 'notes') app.innerHTML = notesPage();
   if (state.route === 'categories') app.innerHTML = categoriesPage();
   if (state.route === 'settings') app.innerHTML = settingsPage();
+  if (state.route === 'playground') app.innerHTML = playgroundPage();
   if (state.route === 'home') startHomeClock();
+  if (state.route === 'playground' && PLAYGROUND_MODULES[state.playgroundView]) mountArtwork(state.playgroundView);
 }
 
 function openDrawer(type, id = null) { state.drawer = { type, id }; render(); }
@@ -780,7 +849,10 @@ async function deleteRadarProfile(profileId) {
 
 app.addEventListener('click', async (e) => {
   try {
-  const nav=e.target.closest('[data-nav]'); if(nav){if(state.route==='notes')await flushNoteDraft();persistNotesUi(nav.dataset.nav==='notes');state.route=nav.dataset.nav; state.search=''; state.drawer=null; render(); window.scrollTo({top:0}); return;}
+  const nav=e.target.closest('[data-nav]'); if(nav){if(state.route==='notes')await flushNoteDraft();persistNotesUi(nav.dataset.nav==='notes');state.route=nav.dataset.nav;if(state.route==='playground')state.playgroundView='list'; state.search=''; state.drawer=null; render(); window.scrollTo({top:0}); return;}
+  const openArtwork=e.target.closest('[data-playground-open]'); if(openArtwork){state.playgroundView=openArtwork.dataset.playgroundOpen;render();window.scrollTo({top:0});return;}
+  if(e.target.closest('[data-playground-back]')){state.playgroundView='list';render();window.scrollTo({top:0});return;}
+  const retryArtwork=e.target.closest('[data-playground-retry]'); if(retryArtwork){mountArtwork(retryArtwork.dataset.playgroundRetry);return;}
   const open=e.target.closest('[data-open]'); if(open){openDrawer(open.dataset.open,open.dataset.open==='edit-radar-profile'?state.radarProfileId:null); return;}
   if(e.target.closest('[data-close]') || (e.target.classList.contains('drawer-backdrop'))){closeDrawer();return;}
   const newNote=e.target.closest('[data-new-note]'); if(newNote){await startNewNote();return;}
@@ -831,7 +903,7 @@ app.addEventListener('change', async (e) => {
 });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&state.route==='notes')flushNoteDraft().catch(()=>{});});
-window.addEventListener('beforeunload',()=>{persistNotesUi(state.route==='notes');});
+window.addEventListener('beforeunload',()=>{persistNotesUi(state.route==='notes');destroyActiveArtwork();});
 
 loadData()
   .then(() => { appLoaded=true; render(); })

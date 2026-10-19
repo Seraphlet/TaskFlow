@@ -1,6 +1,6 @@
 # TaskFlow Workspace V1
 
-一个无构建依赖的本地优先个人工作台，包含 Home、Radar、Notes、Categories 和 Tasks。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
+一个无构建依赖的本地优先个人工作台，包含 Home、Radar、Notes、Categories、Tasks 和按需加载的 Playground。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
 
 首页背景固定引用 `images/home-background.webp`。更换壁纸时直接覆盖同名文件即可，不需要修改源码。FastAPI 静态服务会返回 `Cache-Control: public, max-age=0, must-revalidate`，并通过 ETag / Last-Modified 复用未变化的图片。直接双击 `index.html` 的 `file://` 模式不具备 HTTP 条件缓存语义。
 
@@ -17,7 +17,7 @@ location = /taskflow/images/home-background.webp {
 
 ## 运行
 
-直接双击项目根目录中的 `index.html` 即可运行，无需启动服务。
+直接双击项目根目录中的 `index.html` 仍可使用原有工作台功能。Playground 的两个作品按任务要求使用 ES Module `import()`；Chrome、Edge 等浏览器会阻止 `file://` 页面加载本地模块，因此使用 Playground 时请启动下方任一 HTTP 服务。
 
 双击模式下 Radar 使用内置 Demo Provider。要使用真实联网推荐，请安装 Python 3.11+ 并启动同源服务：
 
@@ -47,11 +47,19 @@ js/storage.js           IndexedDB Local Adapter 与 Remote Adapter 边界
 js/notifications.js     通知事件、纯文本格式与未配置适配器
 js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版本兼容
 js/radar.js             Radar Item 模型、演示 Provider 与生成边界
+js/playground/           按需加载的 Music Geometry 与 Keyboard Art 独立作品
 server/app.py           FastAPI 静态入口、Tavily 搜索、DeepSeek 生成及生命周期存储
 server/security.py      模型 ID 校验、凭证身份与内容指纹
 requirements.txt        可选 Radar 后端依赖
 tests/                  凭证安全、模型校验和 API 边界测试
 ```
+
+## Playground
+
+进入“数字艺术”只显示作品列表，不请求作品模块。选择作品后，`app.js` 才通过动态 `import()` 加载对应模块；同时最多保留一个实例。每个作品都实现 `createArtwork(container)`，并返回 `start()`、`pause()`、`destroy()`。切换作品、返回列表或离开 Playground 时会取消动画帧、停止音频、移除键盘和页面可见性监听、断开观察器并释放大规模轨迹引用。
+
+- Music Geometry 默认以明确标注的虚拟信号演示。选择本地音频后，文件使用 Object URL 在浏览器内播放，不上传；Web Audio API 的整体能量、低频能量和频谱变化共同影响曲线生成、速度、曲率和运动类别。
+- Keyboard Art 仅在作品运行时监听 A–K，输入框和可编辑区域不会触发绘画；长按有节流，画面实体有硬上限。
 
 ## 数据与兼容性
 
