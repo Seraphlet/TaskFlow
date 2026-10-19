@@ -2,6 +2,8 @@ import asyncio
 import json
 import sqlite3
 import unittest
+from datetime import timedelta
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -9,14 +11,20 @@ from fastapi.testclient import TestClient
 from server.app import (
     EXPLORE_LOCKS,
     IDENTITY_SECRET,
+    TAVILY_CREDIT_COSTS,
     Credentials,
     ExploreRequest,
     Profile,
+    ProviderRequest,
     app,
     credential_identity,
     explore,
+    iso,
     parse_deepseek_json,
     recover_unreceived_batch,
+    reserve_credits,
+    tavily_search,
+    utc_now,
 )
 
 
@@ -50,7 +58,7 @@ class RadarApiTests(unittest.TestCase):
     def test_validation_errors_never_echo_credentials(self):
         response = self.client.post(
             "/api/radar/test",
-            json={"credentials": {"tavilyApiKey": "short", "deepseekApiKey": "also-short"}, "modelId": "deepseek-flash"},
+            json={"credentials": {"tavilyApiKey": "short", "deepseekApiKey": "tiny"}, "modelId": "deepseek-flash"},
         )
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("short", response.text)
@@ -106,6 +114,95 @@ class RadarConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         finally:
             lock.release()
             EXPLORE_LOCKS.pop(identity, None)
+
+
+class RadarBudgetTests(unittest.IsolatedAsyncioTestCase):
+    def usage_db(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.execute("CREATE TABLE monthly_usage(identity TEXT, month TEXT, searches INTEGER DEFAULT 0, credits INTEGER DEFAULT 0, PRIMARY KEY(identity,month))")
+        db.execute("CREATE TABLE search_cache(identity TEXT, query_hash TEXT, payload TEXT, expires_at TEXT, PRIMARY KEY(identity,query_hash))")
+        return db
+
+    def test_official_depth_costs_and_atomic_budget(self):
+        self.assertEqual(TAVILY_CREDIT_COSTS["basic"], 1)
+        self.assertEqual(TAVILY_CREDIT_COSTS["advanced"], 2)
+        db = self.usage_db()
+        with patch("server.app.MONTHLY_CREDIT_BUDGET", 3):
+            self.assertEqual(reserve_credits(db, "person", 2), 2)
+            self.assertEqual(reserve_credits(db, "person", 1), 3)
+            with self.assertRaises(HTTPException) as raised:
+                reserve_credits(db, "person", 1)
+            self.assertEqual(raised.exception.status_code, 429)
+        row = db.execute("SELECT searches,credits FROM monthly_usage").fetchone()
+        self.assertEqual((row["searches"], row["credits"]), (2, 3))
+
+    async def test_cache_hit_uses_zero_new_credits(self):
+        db = self.usage_db()
+        query = "cached query"
+        from server.app import query_hash
+        db.execute(
+            "INSERT INTO search_cache(identity,query_hash,payload,expires_at) VALUES(?,?,?,?)",
+            ("person", query_hash(f"tavily:basic\0{query}"), json.dumps([{"url":"https://example.com"}]), iso(utc_now()+timedelta(hours=1))),
+        )
+        results, usage = await tavily_search(db, "person", "tvly-valid-key", query, "sk-valid-key")
+        self.assertEqual(results[0]["url"], "https://example.com")
+        self.assertEqual(usage["cacheHits"], 1)
+        self.assertEqual(usage["tavilyCredits"], 0)
+        self.assertIsNone(db.execute("SELECT * FROM monthly_usage").fetchone())
+
+    async def test_missing_tavily_uses_deepseek_without_tavily_budget(self):
+        db = self.usage_db()
+        with patch("server.app.deepseek_search", AsyncMock(return_value=[{"url":"https://example.com","content":"x"}])) as search:
+            _results, usage = await tavily_search(db, "person", "", "query", "sk-valid-key")
+        search.assert_awaited_once()
+        self.assertEqual(usage["deepseekSearchRequests"], 1)
+        self.assertEqual(usage["tavilyRequests"], 0)
+        self.assertIsNone(db.execute("SELECT * FROM monthly_usage").fetchone())
+
+    async def test_confirmed_tavily_usage_reconciles_reserved_credits(self):
+        db = self.usage_db()
+
+        class FakeResponse:
+            status_code = 200
+            is_success = True
+
+            @staticmethod
+            def json():
+                return {
+                    "results": [{"url": "https://example.com", "title": "Example", "content": "Result"}],
+                    "usage": {"credits": 2},
+                }
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def post(self, *_args, **_kwargs):
+                return FakeResponse()
+
+        with patch("server.app.TAVILY_SEARCH_DEPTH", "basic"), patch("server.app.httpx.AsyncClient", return_value=FakeClient()):
+            results, usage = await tavily_search(db, "person", "tvly-valid-key", "live query", "sk-valid-key")
+
+        self.assertEqual(results[0]["url"], "https://example.com")
+        self.assertEqual(usage["tavilyRequests"], 1)
+        self.assertEqual(usage["tavilyCredits"], 2)
+        self.assertEqual(usage["accounting"], "confirmed")
+        row = db.execute("SELECT searches,credits FROM monthly_usage").fetchone()
+        self.assertEqual((row["searches"], row["credits"]), (1, 2))
+
+    async def test_connection_test_never_calls_search_api(self):
+        payload = ProviderRequest(credentials=Credentials(tavilyApiKey="tvly-configured", deepseekApiKey="sk-valid-key"), modelId="deepseek-flash")
+        with patch("server.app.deepseek_json", AsyncMock(return_value={"ok": True})) as model_call, patch("server.app.tavily_search", AsyncMock()) as search_call:
+            from server.app import test_connection
+            result = await test_connection(payload)
+        model_call.assert_awaited_once()
+        search_call.assert_not_called()
+        self.assertFalse(result["tavily"]["tested"])
+        self.assertIn("不会调用搜索", result["note"])
 
 
 if __name__ == "__main__":

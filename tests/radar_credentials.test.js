@@ -47,9 +47,14 @@ assert.strictEqual(sessionStorage.has('taskflow-tavily-api-key-v1'), false);
 assert.strictEqual(credentials.getConfig().dailyLimit, 7);
 assert.throws(() => credentials.save({ tavilyApiKey:'tvly-x', deepseekApiKey:'deepseek-x', modelId:'deepseek-flash', remember:false, dailyLimit:0 }), /1–50/);
 
+credentials.save({ tavilyApiKey:'', deepseekApiKey:'sk-deepseek-only', modelId:'deepseek-flash', remember:false, dailyLimit:3 });
+assert.strictEqual(credentials.getCredentials().tavilyApiKey, '');
+assert.strictEqual(credentials.getCredentials().deepseekApiKey, 'sk-deepseek-only');
+
 credentials.useSessionOnly();
 assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), false);
-assert.strictEqual(sessionStorage.has('taskflow-tavily-api-key-v1'), true);
+assert.strictEqual(sessionStorage.has('taskflow-tavily-api-key-v1'), false);
+assert.strictEqual(sessionStorage.has('taskflow-deepseek-api-key-v1'), true);
 
 credentials.rememberSessionDraft({ tavilyApiKey: 'tvly-typed-draft', deepseekApiKey: 'sk-typed-draft' });
 assert.strictEqual(credentials.getCredentials().tavilyApiKey, 'tvly-typed-draft');

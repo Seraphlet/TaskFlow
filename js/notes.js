@@ -21,6 +21,31 @@
     async delete(id) { return this.storage.delete('notes', id); }
   }
 
+  class NotesDraftStore {
+    constructor(storage) { this.storage = storage; this.queues = new Map(); }
+    key(source, noteId) { return `draft:${source}:${noteId}`; }
+    async get(source, noteId) { return this.storage.get('noteDrafts', this.key(source, noteId)); }
+    async list(source) { return (await this.storage.all('noteDrafts')).filter((draft) => draft.source === source); }
+    async save(draft) {
+      const id = this.key(draft.source, draft.noteId);
+      const write = async () => {
+        const current = await this.storage.get('noteDrafts', id);
+        if (current && Number(current.revision || 0) > Number(draft.revision || 0)) return current;
+        const value = { ...structuredClone(draft), id };
+        await this.storage.put('noteDrafts', value);
+        return value;
+      };
+      const queued = (this.queues.get(id) || Promise.resolve()).then(() => (
+        typeof navigator !== 'undefined' && navigator.locks
+          ? navigator.locks.request(`taskflow:${id}`, write)
+          : write()
+      ));
+      this.queues.set(id, queued.catch(() => {}));
+      return queued;
+    }
+    async delete(source, noteId) { return this.storage.delete('noteDrafts', this.key(source, noteId)); }
+  }
+
   class NotesCredentialStore {
     getConfig() {
       try { return JSON.parse(localStorage.getItem(CONFIG_KEY)) || { mode: 'Local', apiBase: 'auto', remember: false }; }
@@ -123,5 +148,5 @@
     async delete(id) { if (!String(id).startsWith('memos/')) throw new Error('拒绝删除非 TaskFlow 管理的远端 Memo'); await this.fetch(`${this.apiBase}/${id}`, { method: 'DELETE' }); }
   }
 
-  window.TaskFlowNotes = { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore };
+  window.TaskFlowNotes = { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore, NotesDraftStore };
 })();

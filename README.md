@@ -1,6 +1,6 @@
 # TaskFlow Workspace V1
 
-一个无构建依赖的本地优先个人工作台，包含 Radar、Notes、Categories 和 Tasks。前端使用传统 HTML、CSS 和 JavaScript；任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
+一个无构建依赖的本地优先个人工作台，包含 Home、Radar、Notes、Categories 和 Tasks。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
 
 ## 运行
 
@@ -29,7 +29,7 @@ python -m http.server 4173
 ```text
 index.html              应用入口
 styles.css              公共布局、组件与响应式样式
-js/app.js               应用外壳、四个核心模块及交互
+js/app.js               应用外壳、首页与四个核心模块交互
 js/storage.js           IndexedDB Local Adapter 与 Remote Adapter 边界
 js/notifications.js     通知事件、纯文本格式与未配置适配器
 js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版本兼容
@@ -42,16 +42,17 @@ tests/                  凭证安全、模型校验和 API 边界测试
 
 ## 数据与兼容性
 
-- Tasks、Team、Activity、Handoffs、Local Notes 与 Radar Profiles / Batches 保存在当前浏览器的 IndexedDB 中。
+- Tasks、Team、Activity、Handoffs、Local Notes、Notes 草稿与 Radar Profiles / Batches 保存在当前浏览器的 IndexedDB 中。
+- Notes 草稿按数据源与 Note ID 隔离并自动保存；刷新或关闭后会恢复上次打开的草稿。正式保存成功才清除草稿，失败仍保留。Web Locks 可用时使用单编辑锁，并始终以修订号阻止旧异步写入覆盖新内容。
 - Categories 直接聚合 Note 的 `category` 字段，不维护独立分类数据库。旧 Note 中存在 `companyName` 时会兼容显示为 `Company`。
 - Radar 的 Profile、当前 Batch 与探索历史分开保存。每个 Profile 独立恢复自己的当前批次和历史；切换方向不会覆盖其他方向。成功、无新内容、失败、中断及达到客户端限额都会留下历史记录。
 - 内置 Provider 仍只有有限的演示 Radar Items。它不会循环三批内容，也不会把不匹配用户领域的固定内容伪装成生成结果；候选不足会在页面明确提示。
-- 配置 Tavily 与 DeepSeek 凭证后，`Explore New` 会改用真实 Provider。每次最多生成 3 组搜索查询并优先使用 Tavily；仅在 Tavily 网络故障、限流或服务端错误时使用 DeepSeek Search 作为备用，Tavily 凭证错误仍会明确提示。缓存默认 24 小时；推荐历史默认保存 180 天，Inbox 最长保存 30 天。
+- DeepSeek Key 是真实联网的必需凭证，Tavily Key 可选。配置 Tavily 时优先使用 Tavily；未配置、月度 credits 不足、网络故障、限流或服务端错误时使用官方 DeepSeek Search。Tavily 凭证错误仍会明确提示。每次最多生成 3 组搜索查询，候选已足够时提前停止；缓存默认 24 小时，命中缓存不会新增外部请求。推荐历史默认保存 180 天，Inbox 最长保存 30 天。
 - 联网探索最长等待 4 分钟；进行中前端会禁用重复操作并显示等待提示，后端也会按凭证身份拒绝并发探索。若浏览器曾提前断开但后端已经完成，下一次探索会从 Inbox 恢复尚未被该浏览器接收的批次。
 - 客户端单日联网探索上限默认 3 次，可在 Settings 设置为 1–50；计数按当前设备的本地日期和浏览器数据计算，测试连接、演示探索、被互斥锁拒绝及达到限额的操作不消耗次数。
-- 月度 Tavily 硬预算默认每组凭证身份 1000 次，可通过服务端 `TASKFLOW_TAVILY_MONTHLY_BUDGET` 调整。预算、缓存和跨 Profile 去重使用不可逆 HMAC 身份隔离，SQLite 数据在服务重启后继续有效。
+- Tavily 搜索深度默认 `basic`（官方计费 1 credit）；`advanced` 为 2 credits。可通过 `TASKFLOW_TAVILY_SEARCH_DEPTH=basic|advanced|fast|ultra-fast` 调整。月度硬预算默认每组凭证身份 1000 credits，通过 `TASKFLOW_TAVILY_MONTHLY_CREDIT_BUDGET` 调整（旧变量 `TASKFLOW_TAVILY_MONTHLY_BUDGET` 仍兼容）。请求发出前原子预留 credits，成功响应优先使用官方 `usage.credits` 结算；响应无法确认时保留保守预留并在历史中标记。预算、缓存和跨 Profile 去重使用不可逆 HMAC 身份隔离，SQLite 数据在服务重启后继续有效。
 - 已退役的 `companies` / `comments` 仓库仅为旧数据库和备份结构兼容而保留，不再加载到应用状态，也不再提供查看、编辑或迁移入口。
-- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1–V5 备份均可兼容导入。Memos 远端数据和访问令牌不会进入导出文件。
+- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1–V6 备份均可兼容导入。Memos 远端数据和访问令牌不会进入导出文件。
 - `file://` 存储可能被不同浏览器或文件路径隔离。启动时若 IndexedDB 不可用，应用会明确报错而不是静默丢失数据。
 
 ## Memos（可选）
@@ -66,7 +67,7 @@ Memos Server URL 可以填写实例根地址，也可以粘贴设置页链接；
 
 ## Radar 联网配置（可选）
 
-Settings 中可以配置 Tavily API Key、DeepSeek API Key 和 DeepSeek Model ID。供应商固定为 DeepSeek，API Base URL 固定在后端，前端不能覆盖。默认模型 ID 为 `deepseek-flash`，当前该 ID 对应 DeepSeek V4.1 Flash；当前接口同时提供 `deepseek-v4-pro`。其他符合 `deepseek-*` 命名规则的模型仍会交由 DeepSeek 接口验证并返回明确错误。
+Settings 中可以配置必需的 DeepSeek API Key、可选的 Tavily API Key 和 DeepSeek Model ID。供应商固定为 DeepSeek，API Base URL 固定在后端，前端不能覆盖。默认模型 ID 为 `deepseek-flash`，当前该 ID 对应 DeepSeek V4.1 Flash；当前接口同时提供 `deepseek-v4-pro`。其他符合 `deepseek-*` 命名规则的模型仍会交由 DeepSeek 接口验证并返回明确错误。连接测试只验证模型，不调用 Tavily 或 DeepSeek Search，因此不消耗搜索额度；Tavily 在首次探索时验证。
 
 Radar 的结构化 JSON 生成使用非思考模式，避免思考内容占用输出额度后截断最终 JSON；这不影响 DeepSeek Search 作为 Tavily 故障时的备用搜索能力。
 

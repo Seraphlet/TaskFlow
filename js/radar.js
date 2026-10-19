@@ -106,11 +106,12 @@
       const config = { provider:'DeepSeek', modelId:this.validateModel(modelId), remember:Boolean(remember), dailyLimit:parsedLimit, updatedAt:new Date().toISOString() };
       const tavily = String(tavilyApiKey || '').trim();
       const deepseek = String(deepseekApiKey || '').trim();
-      if (!tavily || !deepseek) throw new Error('请同时填写 Tavily API Key 和 DeepSeek API Key');
+      if (!deepseek) throw new Error('请填写 DeepSeek API Key；Tavily API Key 可选');
       sessionStorage.removeItem(TAVILY_KEY); sessionStorage.removeItem(DEEPSEEK_KEY);
       localStorage.removeItem(TAVILY_KEY); localStorage.removeItem(DEEPSEEK_KEY);
       const target = config.remember ? localStorage : sessionStorage;
-      target.setItem(TAVILY_KEY, tavily); target.setItem(DEEPSEEK_KEY, deepseek);
+      if (tavily) target.setItem(TAVILY_KEY, tavily);
+      target.setItem(DEEPSEEK_KEY, deepseek);
       localStorage.setItem(RADAR_CONFIG_KEY, JSON.stringify(config));
       return config;
     }
@@ -150,7 +151,7 @@
       if (location.protocol !== 'https:' && !(location.protocol === 'http:' && local)) {
         throw new Error('真实 Radar 仅允许通过 HTTPS，或可信 localhost 的 HTTP 环境使用；双击 HTML 时请继续使用 Demo 模式');
       }
-      if (!this.tavilyApiKey || !this.deepseekApiKey) throw new Error('请先在 Settings 保存 Tavily 与 DeepSeek API Key');
+      if (!this.deepseekApiKey) throw new Error('请先在 Settings 保存 DeepSeek API Key；Tavily API Key 可选');
     }
 
     async post(path, payload, timeoutMs = 60000) {

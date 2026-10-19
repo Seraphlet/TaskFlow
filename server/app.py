@@ -27,7 +27,14 @@ SECRET_PATH = DATA_DIR / ".identity-secret"
 TAVILY_URL = "https://api.tavily.com/search"
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_SEARCH_URL = "https://api.deepseek.com/v1/tools/search"
-MONTHLY_BUDGET = max(1, int(os.getenv("TASKFLOW_TAVILY_MONTHLY_BUDGET", "1000")))
+TAVILY_CREDIT_COSTS = {"basic": 1, "fast": 1, "ultra-fast": 1, "advanced": 2}
+TAVILY_SEARCH_DEPTH = os.getenv("TASKFLOW_TAVILY_SEARCH_DEPTH", "basic").strip().lower()
+if TAVILY_SEARCH_DEPTH not in TAVILY_CREDIT_COSTS:
+    TAVILY_SEARCH_DEPTH = "basic"
+MONTHLY_CREDIT_BUDGET = max(
+    1,
+    int(os.getenv("TASKFLOW_TAVILY_MONTHLY_CREDIT_BUDGET", os.getenv("TASKFLOW_TAVILY_MONTHLY_BUDGET", "1000"))),
+)
 CACHE_HOURS = 24
 HISTORY_DAYS = 180
 INBOX_DAYS = 30
@@ -37,7 +44,7 @@ EXPLORE_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class Credentials(BaseModel):
-    tavilyApiKey: str = Field(min_length=8, max_length=512)
+    tavilyApiKey: str = Field(default="", max_length=512)
     deepseekApiKey: str = Field(min_length=8, max_length=512)
 
 
@@ -89,6 +96,7 @@ def connect_db() -> sqlite3.Connection:
         """
         CREATE TABLE IF NOT EXISTS monthly_usage (
           identity TEXT NOT NULL, month TEXT NOT NULL, searches INTEGER NOT NULL DEFAULT 0,
+          credits INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (identity, month)
         );
         CREATE TABLE IF NOT EXISTS search_cache (
@@ -105,6 +113,13 @@ def connect_db() -> sqlite3.Connection:
         );
         """
     )
+    usage_columns = {row[1] for row in db.execute("PRAGMA table_info(monthly_usage)").fetchall()}
+    if "credits" not in usage_columns:
+        db.execute("ALTER TABLE monthly_usage ADD COLUMN credits INTEGER NOT NULL DEFAULT 0")
+        # Every historical request used advanced depth, so the conservative
+        # migration is two credits for each previously recorded request.
+        db.execute("UPDATE monthly_usage SET credits=searches*2 WHERE credits=0 AND searches>0")
+        db.commit()
     return db
 
 
@@ -115,27 +130,60 @@ def cleanup(db: sqlite3.Connection) -> None:
     db.commit()
 
 
-def reserve_search(db: sqlite3.Connection, identity: str) -> int:
+def reserve_credits(db: sqlite3.Connection, identity: str, credit_cost: int) -> int:
     month = utc_now().strftime("%Y-%m")
     try:
         db.execute("BEGIN IMMEDIATE")
-        row = db.execute("SELECT searches FROM monthly_usage WHERE identity=? AND month=?", (identity, month)).fetchone()
-        used = int(row["searches"]) if row else 0
-        if used >= MONTHLY_BUDGET:
+        row = db.execute("SELECT credits FROM monthly_usage WHERE identity=? AND month=?", (identity, month)).fetchone()
+        used = int(row["credits"]) if row else 0
+        if used + credit_cost > MONTHLY_CREDIT_BUDGET:
             db.rollback()
-            raise HTTPException(429, f"Tavily 月度搜索预算已用尽（{MONTHLY_BUDGET} 次）")
+            raise HTTPException(429, f"Tavily 月度预算不足：已预留 {used} / {MONTHLY_CREDIT_BUDGET} credits，本次需要 {credit_cost} credits")
         db.execute(
-            "INSERT INTO monthly_usage(identity, month, searches) VALUES(?,?,1) "
-            "ON CONFLICT(identity, month) DO UPDATE SET searches=searches+1",
-            (identity, month),
+            "INSERT INTO monthly_usage(identity, month, searches, credits) VALUES(?,?,1,?) "
+            "ON CONFLICT(identity, month) DO UPDATE SET searches=searches+1, credits=credits+excluded.credits",
+            (identity, month, credit_cost),
         )
         db.commit()
-        return used + 1
+        return used + credit_cost
     except HTTPException:
         raise
     except sqlite3.Error as exc:
         db.rollback()
-        raise HTTPException(503, "无法更新 Tavily 搜索预算，请稍后重试") from exc
+        raise HTTPException(503, "无法更新 Tavily credits 预算，请稍后重试") from exc
+
+
+def settle_credits(db: sqlite3.Connection, identity: str, reserved: int, confirmed: int) -> None:
+    difference = confirmed - reserved
+    if not difference:
+        return
+    month = utc_now().strftime("%Y-%m")
+    db.execute(
+        "UPDATE monthly_usage SET credits=MAX(0, credits+?) WHERE identity=? AND month=?",
+        (difference, identity, month),
+    )
+    db.commit()
+
+
+def empty_search_usage() -> dict[str, Any]:
+    return {
+        "tavilyRequests": 0,
+        "tavilyCredits": 0,
+        "deepseekSearchRequests": 0,
+        "cacheHits": 0,
+        "tavilyDepth": TAVILY_SEARCH_DEPTH,
+        "tavilyCreditBudget": MONTHLY_CREDIT_BUDGET,
+        "accounting": "confirmed",
+    }
+
+
+def merge_search_usage(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    for key in ("tavilyRequests", "tavilyCredits", "deepseekSearchRequests", "cacheHits"):
+        target[key] = int(target.get(key, 0)) + int(incoming.get(key, 0))
+    if incoming.get("accounting") == "reserved":
+        target["accounting"] = "reserved"
+    if incoming.get("tavilyBudgetExhausted"):
+        target["tavilyBudgetExhausted"] = True
 
 
 def query_hash(query: str) -> str:
@@ -153,11 +201,11 @@ async def deepseek_search(api_key: str, query: str) -> list[dict[str, Any]]:
                 json={"query": query.strip()[:128], "count": 8, "need_content": True},
             )
     except httpx.RequestError as exc:
-        raise HTTPException(502, "Tavily 不可用，DeepSeek 备用搜索也无法连接") from exc
+        raise HTTPException(502, "DeepSeek Search 无法连接，请检查网络后重试") from exc
     if response.status_code in (401, 403):
-        raise HTTPException(400, "DeepSeek API Key 无效或无权使用备用搜索")
+        raise HTTPException(400, "DeepSeek API Key 无效或无权使用联网搜索")
     if not response.is_success:
-        raise HTTPException(502, f"Tavily 不可用，DeepSeek 备用搜索失败（HTTP {response.status_code}）")
+        raise HTTPException(502, f"DeepSeek Search 请求失败（HTTP {response.status_code}）")
     try:
         body = response.json()
         return [
@@ -171,7 +219,7 @@ async def deepseek_search(api_key: str, query: str) -> list[dict[str, Any]]:
             if item.get("url")
         ]
     except (ValueError, TypeError) as exc:
-        raise HTTPException(502, "DeepSeek 备用搜索返回了无法解析的数据") from exc
+        raise HTTPException(502, "DeepSeek Search 返回了无法解析的数据") from exc
 
 
 async def tavily_search(
@@ -180,37 +228,76 @@ async def tavily_search(
     api_key: str,
     query: str,
     fallback_api_key: str | None = None,
-) -> list[dict[str, Any]]:
-    cache_key = query_hash(query)
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    usage = empty_search_usage()
+    cache_provider = f"tavily:{TAVILY_SEARCH_DEPTH}" if api_key.strip() else "deepseek-search"
+    cache_key = query_hash(f"{cache_provider}\0{query}")
     cached = db.execute(
         "SELECT payload FROM search_cache WHERE identity=? AND query_hash=? AND expires_at>?",
         (identity, cache_key, iso()),
     ).fetchone()
     if cached:
-        return json.loads(cached["payload"])
+        usage["cacheHits"] = 1
+        return json.loads(cached["payload"]), usage
 
-    reserve_search(db, identity)
+    if not api_key.strip():
+        if not fallback_api_key:
+            raise HTTPException(400, "未配置 Tavily，且缺少可用于联网搜索的 DeepSeek API Key")
+        results = await deepseek_search(fallback_api_key, query)
+        usage["deepseekSearchRequests"] = 1
+        db.execute(
+            "INSERT OR REPLACE INTO search_cache(identity, query_hash, payload, expires_at) VALUES(?,?,?,?)",
+            (identity, cache_key, json.dumps(results, ensure_ascii=False), iso(utc_now() + timedelta(hours=CACHE_HOURS))),
+        )
+        db.commit()
+        return results, usage
+
+    reserved = TAVILY_CREDIT_COSTS[TAVILY_SEARCH_DEPTH]
+    try:
+        reserve_credits(db, identity, reserved)
+    except HTTPException as exc:
+        if exc.status_code != 429 or not fallback_api_key:
+            raise
+        results = await deepseek_search(fallback_api_key, query)
+        usage["deepseekSearchRequests"] = 1
+        usage["tavilyBudgetExhausted"] = True
+        db.execute(
+            "INSERT OR REPLACE INTO search_cache(identity, query_hash, payload, expires_at) VALUES(?,?,?,?)",
+            (identity, cache_key, json.dumps(results, ensure_ascii=False), iso(utc_now() + timedelta(hours=CACHE_HOURS))),
+        )
+        db.commit()
+        return results, usage
+    usage["tavilyRequests"] = 1
+    usage["tavilyCredits"] = reserved
+    usage["accounting"] = "reserved"
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
                 TAVILY_URL,
-                json={"api_key": api_key, "query": query, "search_depth": "advanced", "max_results": 8, "include_answer": False},
+                json={"api_key": api_key, "query": query, "search_depth": TAVILY_SEARCH_DEPTH, "max_results": 8, "include_answer": False, "include_usage": True},
             )
     except httpx.RequestError as exc:
         if not fallback_api_key:
             raise HTTPException(502, "无法连接 Tavily，请检查网络后重试") from exc
         results = await deepseek_search(fallback_api_key, query)
+        usage["deepseekSearchRequests"] = 1
         response = None
     if response is not None and response.status_code in (401, 403):
         raise HTTPException(400, "Tavily API Key 无效或无权限")
     if response is not None and not response.is_success:
         if fallback_api_key and (response.status_code == 429 or response.status_code >= 500):
             results = await deepseek_search(fallback_api_key, query)
+            usage["deepseekSearchRequests"] = 1
         else:
             raise HTTPException(502, f"Tavily 请求失败（HTTP {response.status_code}）")
     if response is not None and response.is_success:
         try:
             body = response.json()
+            confirmed = int(body.get("usage", {}).get("credits", reserved))
+            if confirmed >= 0:
+                settle_credits(db, identity, reserved, confirmed)
+                usage["tavilyCredits"] = confirmed
+                usage["accounting"] = "confirmed"
             results = [
                 {
                     "title": str(item.get("title", ""))[:300],
@@ -225,12 +312,13 @@ async def tavily_search(
             if not fallback_api_key:
                 raise HTTPException(502, "Tavily 返回了无法解析的数据") from exc
             results = await deepseek_search(fallback_api_key, query)
+            usage["deepseekSearchRequests"] = 1
     db.execute(
         "INSERT OR REPLACE INTO search_cache(identity, query_hash, payload, expires_at) VALUES(?,?,?,?)",
         (identity, cache_key, json.dumps(results, ensure_ascii=False), iso(utc_now() + timedelta(hours=CACHE_HOURS))),
     )
     db.commit()
-    return results
+    return results, usage
 
 
 def parse_deepseek_json(content: Any, finish_reason: Any = None) -> dict[str, Any]:
@@ -423,17 +511,21 @@ async def test_connection(request: ProviderRequest) -> dict[str, Any]:
         model_id = validate_model_id(request.modelId)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    identity = credential_identity(IDENTITY_SECRET, request.credentials.tavilyApiKey, request.credentials.deepseekApiKey)
-    with connect_db() as db:
-        cleanup(db)
-        await tavily_search(db, identity, request.credentials.tavilyApiKey, "TaskFlow connection test")
     await deepseek_json(
         request.credentials.deepseekApiKey,
         model_id,
         [{"role": "system", "content": "Return JSON only."}, {"role": "user", "content": '{"ok":true}'}],
         max_tokens=128,
     )
-    return {"ok": True, "provider": "DeepSeek", "modelId": model_id}
+    tavily_configured = bool(request.credentials.tavilyApiKey.strip())
+    return {
+        "ok": True,
+        "provider": "DeepSeek",
+        "modelId": model_id,
+        "searchMode": "Tavily preferred" if tavily_configured else "DeepSeek Search",
+        "tavily": {"configured": tavily_configured, "tested": False},
+        "note": "连接测试不会调用搜索接口或消耗搜索 credits；Tavily 将在首次探索时验证。",
+    }
 
 
 @app.post("/api/radar/explore")
@@ -454,20 +546,26 @@ async def explore_locked(request: ExploreRequest, model_id: str, identity: str) 
     with connect_db() as db:
         cleanup(db)
         candidates: list[dict[str, Any]] = []
+        search_usage = empty_search_usage()
         for section, query in search_queries(request.profile):
-            results = await tavily_search(
+            results, query_usage = await tavily_search(
                 db,
                 identity,
                 request.credentials.tavilyApiKey,
                 query,
                 fallback_api_key=request.credentials.deepseekApiKey,
             )
-            candidates.extend(prepare_candidates(db, identity, section, results))
+            merge_search_usage(search_usage, query_usage)
+            known_urls = {item["url"] for item in candidates}
+            candidates.extend(item for item in prepare_candidates(db, identity, section, results) if item["url"] not in known_urls)
+            if len(candidates) >= sum(QUOTAS.values()):
+                break
         if not candidates:
             recovered = recover_unreceived_batch(db, identity, request.profile.id, model_id, request.usedItemIds)
             if recovered:
                 return recovered
-            return {"items": [], "shortages": QUOTAS, "provider": "Tavily + DeepSeek", "modelId": model_id, "exhausted": True}
+            provider = "DeepSeek Search + DeepSeek" if not request.credentials.tavilyApiKey.strip() else "Tavily / DeepSeek Search + DeepSeek"
+            return {"items": [], "shortages": QUOTAS, "provider": provider, "modelId": model_id, "exhausted": True, "searchUsage": search_usage}
 
         search_providers = {str(item.get("_searchProvider", "Tavily")) for item in candidates}
         if search_providers == {"DeepSeek Search"}:
@@ -510,7 +608,7 @@ async def explore_locked(request: ExploreRequest, model_id: str, identity: str) 
             )
         counts = {section: len([item for item in items if item["section"] == section]) for section in QUOTAS}
         shortages = {section: max(0, quota - counts[section]) for section, quota in QUOTAS.items()}
-        response = {"items": items, "shortages": shortages, "provider": provider_label, "modelId": model_id, "exhausted": not items}
+        response = {"items": items, "shortages": shortages, "provider": provider_label, "modelId": model_id, "exhausted": not items, "searchUsage": search_usage}
         db.execute(
             "INSERT INTO inbox(identity,profile_id,payload,created_at) VALUES(?,?,?,?)",
             (identity, request.profile.id, json.dumps(response, ensure_ascii=False), iso()),

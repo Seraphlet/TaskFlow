@@ -1,7 +1,7 @@
 (() => {
 const DB_NAME = 'taskflow-workspace-v1';
-const DB_VERSION = 5;
-const ACTIVE_STORES = ['tasks', 'activity', 'handoffs', 'team', 'notes', 'radar', 'radarProfiles', 'radarBatches', 'radarHistory'];
+const DB_VERSION = 6;
+const ACTIVE_STORES = ['tasks', 'activity', 'handoffs', 'team', 'notes', 'noteDrafts', 'radar', 'radarProfiles', 'radarBatches', 'radarHistory'];
 // Keep the retired stores in the database/backup contract so an upgrade never
 // deletes historical browser data. The application no longer loads or exposes
 // them in its UI.
@@ -79,16 +79,17 @@ class LocalStorageAdapter {
 
   async exportData() {
     const entries = await Promise.all(STORES.map(async (name) => [name, await this.all(name)]));
-    return { schemaVersion: 5, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
+    return { schemaVersion: 6, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
   }
 
   validateImport(payload) {
-    if (!payload || ![1, 2, 3, 4, 5].includes(payload.schemaVersion) || !payload.data || typeof payload.data !== 'object') {
+    if (!payload || ![1, 2, 3, 4, 5, 6].includes(payload.schemaVersion) || !payload.data || typeof payload.data !== 'object') {
       throw new Error('备份文件版本或结构无效');
     }
     for (const name of STORES) {
       const optionalLegacyStore =
         (name === 'notes' && payload.schemaVersion === 1) ||
+        (name === 'noteDrafts' && payload.schemaVersion < 6) ||
         (name === 'radar' && payload.schemaVersion < 3) ||
         (['radarProfiles', 'radarBatches'].includes(name) && payload.schemaVersion < 4) ||
         (name === 'radarHistory' && payload.schemaVersion < 5);
