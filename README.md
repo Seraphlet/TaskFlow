@@ -42,7 +42,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 
 ## 数据与兼容性
 
-- Tasks、Team、Activity、Handoffs、Local Notes、Radar Profiles / Batches 与旧版公司墙数据保存在当前浏览器的 IndexedDB 中。
+- Tasks、Team、Activity、Handoffs、Local Notes 与 Radar Profiles / Batches 保存在当前浏览器的 IndexedDB 中。
 - Categories 直接聚合 Note 的 `category` 字段，不维护独立分类数据库。旧 Note 中存在 `companyName` 时会兼容显示为 `Company`。
 - Radar 的 Profile、当前 Batch 与探索历史分开保存。每个 Profile 独立恢复自己的当前批次和历史；切换方向不会覆盖其他方向。成功、无新内容、失败、中断及达到客户端限额都会留下历史记录。
 - 内置 Provider 仍只有有限的演示 Radar Items。它不会循环三批内容，也不会把不匹配用户领域的固定内容伪装成生成结果；候选不足会在页面明确提示。
@@ -50,7 +50,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 - 联网探索最长等待 4 分钟；进行中前端会禁用重复操作并显示等待提示，后端也会按凭证身份拒绝并发探索。若浏览器曾提前断开但后端已经完成，下一次探索会从 Inbox 恢复尚未被该浏览器接收的批次。
 - 客户端单日联网探索上限默认 3 次，可在 Settings 设置为 1–50；计数按当前设备的本地日期和浏览器数据计算，测试连接、演示探索、被互斥锁拒绝及达到限额的操作不消耗次数。
 - 月度 Tavily 硬预算默认每组凭证身份 1000 次，可通过服务端 `TASKFLOW_TAVILY_MONTHLY_BUDGET` 调整。预算、缓存和跨 Profile 去重使用不可逆 HMAC 身份隔离，SQLite 数据在服务重启后继续有效。
-- 原 `companies` / `comments` 数据仍保留，可在 Settings 中显式复制到 `Company` 分类的 Local Notes；迁移不删除旧数据并按固定 ID 去重。
+- 已退役的 `companies` / `comments` 仓库仅为旧数据库和备份结构兼容而保留，不再加载到应用状态，也不再提供查看、编辑或迁移入口。
 - JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1–V5 备份均可兼容导入。Memos 远端数据和访问令牌不会进入导出文件。
 - `file://` 存储可能被不同浏览器或文件路径隔离。启动时若 IndexedDB 不可用，应用会明确报错而不是静默丢失数据。
 

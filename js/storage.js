@@ -1,7 +1,12 @@
 (() => {
 const DB_NAME = 'taskflow-workspace-v1';
 const DB_VERSION = 5;
-const STORES = ['tasks', 'activity', 'handoffs', 'team', 'companies', 'comments', 'notes', 'radar', 'radarProfiles', 'radarBatches', 'radarHistory'];
+const ACTIVE_STORES = ['tasks', 'activity', 'handoffs', 'team', 'notes', 'radar', 'radarProfiles', 'radarBatches', 'radarHistory'];
+// Keep the retired stores in the database/backup contract so an upgrade never
+// deletes historical browser data. The application no longer loads or exposes
+// them in its UI.
+const LEGACY_STORES = ['companies', 'comments'];
+const STORES = [...ACTIVE_STORES, ...LEGACY_STORES];
 
 const clone = (value) => structuredClone(value);
 
@@ -115,5 +120,5 @@ class RemoteStorageAdapter {
   constructor() { throw new Error('Remote storage is not configured'); }
 }
 
-window.TaskFlowStorage = { LocalStorageAdapter, RemoteStorageAdapter, STORES };
+window.TaskFlowStorage = { LocalStorageAdapter, RemoteStorageAdapter, STORES, ACTIVE_STORES };
 })();
