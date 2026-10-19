@@ -24,7 +24,7 @@ let homeClockTimer = null;
 let activeArtwork = null;
 let artworkLoadToken = 0;
 const PLAYGROUND_MODULES = {
-  music: './playground/music-geometry.js?v=20261019-playground-v1-1',
+  music: './playground/music-geometry.js?v=20261019-music-life-v2-6-5',
   keyboard: './playground/keyboard-art.js?v=20261019-playground-v1-1',
 };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
@@ -267,7 +267,7 @@ function playgroundPage() {
   if (state.playgroundView === 'music' || state.playgroundView === 'keyboard') {
     const isMusic = state.playgroundView === 'music';
     const title = isMusic ? 'Music Geometry' : 'Keyboard Art';
-    const subtitle = isMusic ? '让声音推动曲线穿过坐标空间' : '用 A–K 键生成光线、粒子与数学花纹';
+    const subtitle = isMusic ? '让一首音乐从诞生、生长到消散' : '用 A–K 键生成光线、粒子与数学花纹';
     return shell(`<section class="page playground-page playground-work-page">
       <div class="playground-work-head">
         <button class="btn" type="button" data-playground-back>← 返回作品列表</button>
@@ -283,7 +283,7 @@ function playgroundPage() {
     <div class="playground-grid">
       <article class="playground-card playground-card-music">
         <div class="playground-card-art" aria-hidden="true"><i></i><i></i><i></i><span>∿</span></div>
-        <div class="playground-card-copy"><span class="home-card-kicker">AUDIO × MATHEMATICS</span><h4>Music Geometry</h4><p>主动选择正在播放音乐的浏览器标签页，看波动、旋转和穿梭轨迹随共享音频改变行为。</p><ul><li>标签页音频捕获</li><li>三类动态曲线</li><li>本地文件备用</li></ul><button class="btn primary" type="button" data-playground-open="music">进入作品 →</button></div>
+        <div class="playground-card-copy"><span class="home-card-kicker">AUDIO × MATHEMATICS</span><h4>Music Geometry</h4><p>主动选择正在播放音乐的浏览器标签页，看一首音乐化为从诞生、生长到消散的连续生命轨迹。</p><ul><li>标签页音频捕获</li><li>多线连续轨迹</li><li>本地文件备用</li></ul><button class="btn primary" type="button" data-playground-open="music">进入作品 →</button></div>
       </article>
       <article class="playground-card playground-card-keyboard">
         <div class="playground-card-art keyboard-preview" aria-hidden="true"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><kbd>F</kbd><span>✦</span></div>
