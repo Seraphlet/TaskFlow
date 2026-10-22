@@ -6,6 +6,7 @@ const app = fs.readFileSync('js/app.js', 'utf8');
 const music = fs.readFileSync('js/playground/music-geometry.js', 'utf8');
 const keyboard = fs.readFileSync('js/playground/keyboard-art.js', 'utf8');
 const life = fs.readFileSync('js/playground/life-geometry.js', 'utf8');
+const styles = fs.readFileSync('styles.css', 'utf8');
 
 assert.strictEqual(index.includes('music-geometry.js'), false, 'music module must not be statically loaded');
 assert.strictEqual(index.includes('keyboard-art.js'), false, 'keyboard module must not be statically loaded');
@@ -55,11 +56,22 @@ assert.match(keyboard, /createDynamicsCompressor/, 'keyboard audio must protect 
 assert.match(keyboard, /data-mute/, 'keyboard artwork must provide mute control');
 assert.match(keyboard, /data-volume/, 'keyboard artwork must provide volume control');
 assert.match(keyboard, /input, textarea, select/, 'keyboard artwork must ignore text inputs');
-assert.match(life, /simulateLife\(template,world/, 'life artwork must render simulation results instead of deciding events in Canvas');
+assert.match(life, /simulateLife\(templateSnapshot,world/, 'life artwork must render simulation results instead of deciding events in Canvas');
 assert.match(life, /playhead\*pixelsPerTime-available\*\.5/, 'life viewport must keep the current time near the middle');
 assert.match(life, /data-life-duration/, 'life artwork must offer the requested 60-180 second viewing range');
 assert.match(life, /result\.endAge\/effectiveDuration/, 'life pacing must use selected viewing duration instead of raw lifespan speed');
+assert.match(life, /async function precomputePlayback/, 'life paths and event nodes must be prepared before playback');
+assert.match(life, /new Float32Array/, 'life playback must cache compact sampled coordinates');
+assert.match(life, /prepareWhenIdle/, 'next-life preparation must yield to transition rendering');
+assert.match(life, /lowerBound\(track\.times,firstVisibleTime\)/, 'life rendering must begin at the visible sample range');
+assert.match(life, /pendingPreparation\?\.status==='ready'/, 'life transitions must wait for a complete prepared result');
+assert.match(life, /preparationToken\+=1/, 'setting changes and destroy must invalidate stale prepared lives');
+const lifeDraw = life.slice(life.indexOf('function draw(){'), life.indexOf('function effectiveDuration'));
+assert.doesNotMatch(lifeDraw, /stateOffset\(|interpolate\(/, 'life draw loop must not repeat state interpolation');
 assert.match(life, /new Audio\(\)/, 'life artwork must provide independent local background audio');
 assert.doesNotMatch(life, /AnalyserNode|createAnalyser/, 'life background music must not affect simulation or curves');
+assert.match(styles, /\.playground-shell > \.sidebar \{ position: sticky;/, 'desktop playground sidebar must remain fixed within the viewport');
+assert.match(styles, /\.life-event-feed b \{ font-size: 13px; \}/, 'life event summaries must remain readable');
+assert.match(styles, /\.life-event-feed small \{[^}]*font-size: 12px;/, 'life event metadata must remain readable');
 
 console.log('Playground lifecycle and cold-start contract tests passed');
