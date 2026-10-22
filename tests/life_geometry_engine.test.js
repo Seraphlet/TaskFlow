@@ -4,8 +4,8 @@ const vm = require('vm');
 
 const source = fs.readFileSync('js/playground/life-geometry-engine.js', 'utf8').replaceAll('export ', '');
 const sandbox = { module:{exports:{}}, console, JSON, Math, Set };
-vm.runInNewContext(`${source}\nmodule.exports={simulateLife,validatePersonTemplate,validateLifeResult,parseLifeImport};`, sandbox);
-const { simulateLife, validatePersonTemplate, validateLifeResult } = sandbox.module.exports;
+vm.runInNewContext(`${source}\nmodule.exports={simulateLife,validatePersonTemplate,validateLifeStory,validateLifeResult,normalizeLifeStory,parseLifeImport};`, sandbox);
+const { simulateLife, validatePersonTemplate, validateLifeStory, validateLifeResult, normalizeLifeStory, parseLifeImport } = sandbox.module.exports;
 
 function template() { return {
   schemaVersion:'1.0',kind:'person-template',mode:'open',metadata:{fictional:true},
@@ -23,6 +23,9 @@ function world(id, overrides={}) { return {id,label:id,basis:'artistic-simulatio
 const person=template(),calm=world('calm');
 const first=simulateLife(person,calm,{birthYear:1950,seed:'same'}),second=simulateLife(person,calm,{birthYear:1950,seed:'same'});
 assert.deepStrictEqual(first,second,'same person/world/year/seed must reproduce exactly');
+assert.ok(first.events.filter(event=>event.characterId==='p').length>=10,'a typical life must contain ordinary connective events, not only milestones');
+assert.ok(first.events.filter(event=>event.characterId==='friend').length>=4,'a companion must have independent events');
+assert.ok(first.events.some(event=>event.characterId==='friend'&&event.type!=='relationship'),'companion events must not be limited to meeting the protagonist');
 
 const disrupted=world('disrupted',{base:{educationOpportunity:.2,economy:.3,medicalCare:.4,mobility:.3,conflictRisk:.6}});
 const otherEra=simulateLife(person,disrupted,{birthYear:1950,seed:'same'});
@@ -44,4 +47,15 @@ assert.ok(validatePersonTemplate(person).valid,'valid person template must pass'
 assert.ok(validateLifeResult(first).valid,'simulation output must satisfy result contract');
 const bad=JSON.parse(JSON.stringify(first));bad.relationships[0].toId='missing';
 assert.ok(!validateLifeResult(bad).valid,'invalid character reference must be rejected');
+
+const simpleStory={schemaVersion:'1.0',kind:'life-story',timelineType:'age',primaryCharacterId:'a',metadata:{title:'test',fictional:true},characters:[{id:'a',name:'甲',birthTime:0,initialState:{health:.8}},{id:'b',name:'乙',birthTime:2}],events:[{id:'a0',characterId:'a',time:0,type:'birth',title:'出生'},{id:'b0',characterId:'b',time:2,type:'birth',title:'出生'},{id:'b1',characterId:'b',time:20,type:'career',title:'工作',stateChanges:{resources:.2}},{id:'a1',characterId:'a',time:30,type:'death',title:'离世',stateChanges:{health:-.8}},{id:'b2',characterId:'b',time:33,type:'daily-life',title:'继续生活'}],relationships:[{fromId:'a',toId:'b',startTime:12,endTime:24,status:'close',endReason:'separation'}]};
+assert.ok(validateLifeStory(simpleStory).valid,'simple AI story contract must validate');
+const normalized=normalizeLifeStory(simpleStory);
+assert.strictEqual(normalized.kind,'life-result','simple story must normalize into the one renderer contract');
+assert.ok(normalized.characters.every(character=>character.annualStates.length>=2),'normalizer must generate drawing states instead of asking AI for annualStates');
+assert.ok(normalized.characters.find(character=>character.id==='b').timelineEnd>normalized.characters.find(character=>character.id==='a').timelineEnd,'companion must continue after protagonist death');
+assert.deepStrictEqual(parseLifeImport(JSON.stringify(simpleStory)),normalized,'the import chain must normalize a valid AI story');
+assert.throws(()=>parseLifeImport('{bad json'),/JSON 语法错误/,'syntax errors must be explicit');
+const invalid=JSON.parse(JSON.stringify(simpleStory));invalid.characters.push({id:'a',name:'重复'});invalid.events.push({id:'late',characterId:'a',time:40,type:'career',title:'死亡后事件'});
+assert.throws(()=>parseLifeImport(invalid),/characters\[2\]\.id.*重复 ID.*events\[5\]\.time.*不能晚于/, 'invalid imports must report field paths and leave normalization untouched');
 console.log('Life Geometry deterministic simulation and causality tests passed');

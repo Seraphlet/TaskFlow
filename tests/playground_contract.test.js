@@ -44,6 +44,9 @@ assert.match(music, /mode==='rest'/, 'ended input must enter a tail-decay state'
 assert.match(music, /novelty=Math\.max\(0,value-baseline\)/, 'new layers must be compared with a stable recent baseline');
 assert.match(music, /function drawRibbon/, 'each logical layer must render as a bundle of nearby fine lines');
 assert.match(music, /organicMain/, 'main ribbon must use organic compound motion');
+assert.match(music, /worldX-area\.span\*\.5/, 'music viewport must follow continuously once the head reaches the middle');
+assert.match(music, /livePoint=\{x:worldX/, 'music head must interpolate every animation frame rather than wait for samples');
+assert.match(music, /data-perf/, 'music artwork must expose lightweight measured frame timing');
 assert.doesNotMatch(music, /area\.bottom-area-top/, 'companion coordinates must not contain the invalid height expression');
 assert.match(keyboard, /const KEYS = \['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K'\]/, 'keyboard mapping must expose A-K effects');
 assert.match(keyboard, /MAX_MARKS = 900/, 'keyboard artwork must cap visual entities');
@@ -53,6 +56,9 @@ assert.match(keyboard, /data-mute/, 'keyboard artwork must provide mute control'
 assert.match(keyboard, /data-volume/, 'keyboard artwork must provide volume control');
 assert.match(keyboard, /input, textarea, select/, 'keyboard artwork must ignore text inputs');
 assert.match(life, /simulateLife\(template,world/, 'life artwork must render simulation results instead of deciding events in Canvas');
+assert.match(life, /playhead\*pixelsPerTime-available\*\.5/, 'life viewport must keep the current time near the middle');
+assert.match(life, /data-life-duration/, 'life artwork must offer the requested 60-180 second viewing range');
+assert.match(life, /result\.endAge\/effectiveDuration/, 'life pacing must use selected viewing duration instead of raw lifespan speed');
 assert.match(life, /new Audio\(\)/, 'life artwork must provide independent local background audio');
 assert.doesNotMatch(life, /AnalyserNode|createAnalyser/, 'life background music must not affect simulation or curves');
 

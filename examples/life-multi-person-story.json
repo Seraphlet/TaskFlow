@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "kind": "life-story",
+  "timelineType": "age",
+  "primaryCharacterId": "lan",
+  "tailDuration": 3,
+  "metadata": { "title": "海风经过的那些年", "fictional": true, "basis": "fictional-story" },
+  "characters": [
+    { "id": "lan", "name": "阿澜", "role": "primary", "birthTime": 0, "endTime": 72, "initialState": { "health": 0.78, "resources": 0.45, "mood": 0.58, "education": 0.08, "stability": 0.55 } },
+    { "id": "zhou", "name": "周舟", "role": "companion", "birthTime": 2, "endTime": 78, "initialState": { "health": 0.82, "resources": 0.5, "mood": 0.62, "education": 0.08, "stability": 0.6 } }
+  ],
+  "events": [
+    { "id": "e1", "characterId": "lan", "time": 0, "type": "birth", "title": "阿澜出生", "description": "海边小城里，一段人生开始。" },
+    { "id": "e2", "characterId": "zhou", "time": 2, "type": "birth", "title": "周舟出生", "description": "同一个世界里，另一段人生也开始。" },
+    { "id": "e3", "characterId": "lan", "time": 13, "type": "growth", "title": "学会修理收音机", "description": "她第一次发现耐心可以让沉默的东西重新发声。", "stateChanges": { "education": 0.08, "mood": 0.04 } },
+    { "id": "e4", "characterId": "zhou", "time": 16, "type": "family", "title": "跟随家人迁居", "description": "周舟离开旧街，在陌生城市重新认识日常。", "stateChanges": { "stability": -0.08, "resources": -0.05 } },
+    { "id": "e5", "characterId": "lan", "time": 20, "type": "career", "title": "在码头找到工作", "description": "工作普通而忙碌，生活第一次有了固定节奏。", "stateChanges": { "resources": 0.12, "stability": 0.08 } },
+    { "id": "e6", "characterId": "zhou", "time": 25, "type": "career", "title": "成为社区教师", "description": "周舟开始陪伴一群孩子度过漫长下午。", "stateChanges": { "resources": 0.1, "education": 0.12 } },
+    { "id": "e7", "characterId": "lan", "time": 29, "type": "relationship", "title": "两人在雨夜相遇", "description": "一次避雨让两条各自生长的生命线靠近。", "stateChanges": { "mood": 0.08 } },
+    { "id": "e8", "characterId": "zhou", "time": 43, "type": "migration", "title": "周舟再次远行", "description": "新的工作让周舟离开海边，两人逐渐少了联系。", "stateChanges": { "stability": -0.04, "mood": -0.05 } },
+    { "id": "e9", "characterId": "lan", "time": 55, "type": "daily-life", "title": "照料门前的小花园", "description": "多数日子平静重复，植物记录了缓慢变化。", "stateChanges": { "mood": 0.05, "stability": 0.04 } },
+    { "id": "e10", "characterId": "zhou", "time": 61, "type": "relationship", "title": "寄来一封旧信", "description": "多年后的问候没有改写过去，却让记忆重新清晰。", "stateChanges": { "mood": 0.06 } },
+    { "id": "e11", "characterId": "lan", "time": 72, "type": "death", "title": "阿澜离世", "description": "她的一生在一个平静清晨结束。", "stateChanges": { "health": -0.8 } },
+    { "id": "e12", "characterId": "zhou", "time": 76, "type": "daily-life", "title": "周舟仍会走到海边", "description": "一个人的生命结束后，另一个人的日子仍在继续。", "stateChanges": { "mood": -0.03 } }
+  ],
+  "relationships": [
+    { "id": "r1", "fromId": "lan", "toId": "zhou", "startTime": 29, "endTime": 43, "status": "close", "endReason": "separation" }
+  ]
+}

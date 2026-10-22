@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "kind": "life-story",
+  "timelineType": "age",
+  "primaryCharacterId": "missing-person",
+  "metadata": { "title": "故意错误的校验示例", "fictional": true },
+  "characters": [
+    { "id": "same", "name": "甲", "initialState": { "health": 1.4 } },
+    { "id": "same", "name": "乙" }
+  ],
+  "events": [
+    { "id": "death", "characterId": "same", "time": 20, "type": "death", "title": "离世" },
+    { "id": "after", "characterId": "same", "time": 30, "type": "career", "title": "死亡后的错误事件" }
+  ],
+  "relationships": [
+    { "fromId": "same", "toId": "unknown", "startTime": 10, "endTime": 5 }
+  ]
+}

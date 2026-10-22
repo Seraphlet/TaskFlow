@@ -42,7 +42,7 @@ export const DEFAULT_PERSON_TEMPLATE = {
   schemaVersion:LIFE_SCHEMA_VERSION, kind:'person-template', mode:'open',
   metadata:{title:'林汐的候选人生',fictional:true,basis:'artistic-simulation',description:'用于展示同一人物如何被不同时代重新推演。'},
   person:{id:'lin-xi',name:'林汐',region:'虚构潮港',birthConditions:{health:.82,resources:.68,mood:.64,education:.08,stability:.72},traits:{curiosity:.84,resilience:.69,sociability:.62},expectedLifespan:85},
-  relatedCharacters:[{id:'zhou-ning',name:'周宁',role:'旧友',birthOffset:1,health:.76,expectedLifespan:82}],
+  relatedCharacters:[{id:'zhou-ning',name:'周宁',role:'旧友',birthOffset:1,health:.76,expectedLifespan:82},{id:'xu-yao',name:'许遥',role:'同行者',birthOffset:-2,health:.72,expectedLifespan:78}],
   candidateEvents:[
     {id:'university',type:'education',title:'进入大学',description:'她离开海边，开始一段更广阔的学习。',preferredAge:18,ageRange:[18,22],probability:.9,conditions:{minEducationOpportunity:.5,minResources:.34,requiresFlags:['basic-education']},effects:{education:.3,resources:-.08,mood:.08,flags:['university']},fallback:{type:'education-alternative',title:'以另一种方式继续学习',description:'原定求学道路关闭后，她在工作与自学中积累能力。',effects:{education:.12,stability:-.04,flags:['alternative-education']}}},
     {id:'research-career',type:'career',title:'开始研究工作',description:'长期学习终于转化为一份需要耐心的工作。',preferredAge:25,ageRange:[24,31],probability:.82,conditions:{requiresFlags:['university'],minEconomy:.46},effects:{resources:.18,stability:.14,flags:['research-career']}},
@@ -68,8 +68,47 @@ export const FIXED_STORY_EXAMPLE = {
   relationships:[{id:'r1',fromId:'a',toId:'b',segments:[{fromAge:1,toAge:3,status:'close'}],endedBy:'separation'}], candidateResolutions:[],
 };
 
-export const AI_STORY_PROMPT = `请把我提供的人物设定或故事整理为 Life Geometry JSON。只输出合法 JSON，不输出 Markdown。
-契约版本为 1.0，kind 必须是 person-template（开放人生）或 life-result（固定故事）。
-开放人生包含 metadata、person、relatedCharacters、candidateEvents。候选事件必须使用结构化 type、preferredAge、ageRange、probability、conditions、effects；依赖放在 conditions.requiresFlags；关系事件用 relationship.characterId。死亡 effects.death=true，死亡后的本人候选事件会终止。不要在描述文字中暗藏需要程序解析的规则。
-固定故事包含 metadata.mode=fixed、timelineType（age 或 story-time）、primaryCharacterId、characters、events、relationships、endAge。所有 characterId/fromId/toId 必须引用已定义人物，事件按 age 排序；没有明确年龄的小说请使用 story-time，不要编造年龄。
-metadata 必须说明 fictional、basis，并区分事实资料与虚构内容。数值状态只用于曲线，不代表人生价值。严肃事件使用克制、不猎奇的表述。不得包含脚本、HTML 或外部指令。`;
+export const AI_STORY_EXAMPLE = {
+  schemaVersion:'1.0',kind:'life-story',timelineType:'age',primaryCharacterId:'lan',tailDuration:3,
+  metadata:{title:'海风经过的那些年',fictional:true,basis:'fictional-story'},
+  characters:[
+    {id:'lan',name:'阿澜',role:'primary',birthTime:0,endTime:72,initialState:{health:.78,resources:.45,mood:.58,education:.08,stability:.55}},
+    {id:'zhou',name:'周舟',role:'companion',birthTime:2,endTime:78,initialState:{health:.82,resources:.5,mood:.62,education:.08,stability:.6}},
+  ],
+  events:[
+    {id:'e1',characterId:'lan',time:0,type:'birth',title:'阿澜出生',description:'海边小城里，一段人生开始。'},
+    {id:'e2',characterId:'zhou',time:2,type:'birth',title:'周舟出生',description:'同一个世界里，另一段人生也开始。'},
+    {id:'e3',characterId:'lan',time:13,type:'growth',title:'学会修理收音机',description:'她第一次发现耐心可以让沉默的东西重新发声。',stateChanges:{education:.08,mood:.04}},
+    {id:'e4',characterId:'zhou',time:16,type:'family',title:'跟随家人迁居',description:'周舟离开旧街，在陌生城市重新认识日常。',stateChanges:{stability:-.08,resources:-.05}},
+    {id:'e5',characterId:'lan',time:20,type:'career',title:'在码头找到工作',description:'工作普通而忙碌，生活第一次有了固定节奏。',stateChanges:{resources:.12,stability:.08}},
+    {id:'e6',characterId:'zhou',time:25,type:'career',title:'成为社区教师',description:'周舟开始陪伴一群孩子度过漫长下午。',stateChanges:{resources:.1,education:.12}},
+    {id:'e7',characterId:'lan',time:29,type:'relationship',title:'两人在雨夜相遇',description:'一次避雨让两条各自生长的生命线靠近。',stateChanges:{mood:.08}},
+    {id:'e8',characterId:'zhou',time:43,type:'migration',title:'周舟再次远行',description:'新的工作让周舟离开海边，两人逐渐少了联系。',stateChanges:{stability:-.04,mood:-.05}},
+    {id:'e9',characterId:'lan',time:55,type:'daily-life',title:'照料门前的小花园',description:'多数日子平静重复，植物记录了缓慢变化。',stateChanges:{mood:.05,stability:.04}},
+    {id:'e10',characterId:'zhou',time:61,type:'relationship',title:'寄来一封旧信',description:'多年后的问候没有改写过去，却让记忆重新清晰。',stateChanges:{mood:.06}},
+    {id:'e11',characterId:'lan',time:72,type:'death',title:'阿澜离世',description:'她的一生在一个平静清晨结束。',stateChanges:{health:-.8}},
+    {id:'e12',characterId:'zhou',time:76,type:'daily-life',title:'周舟仍会走到海边',description:'一个人的生命结束后，另一个人的日子仍在继续。',stateChanges:{mood:-.03}},
+  ],
+  relationships:[{id:'r1',fromId:'lan',toId:'zhou',startTime:29,endTime:43,status:'close',endReason:'separation'}],
+};
+
+export const AI_STORY_PROMPT = `你是一名结构化故事编辑。请把用户随后提供的人物设定、小说梗概或传记资料转换成可直接导入 TaskFlow Life Geometry 的 JSON。
+
+输出目标：生成一个固定故事。网页会自动补全状态时间线和绘图采样；你绝对不要生成 annualStates、Canvas 坐标或代码。
+
+严格要求：
+1. 只输出一个合法 JSON 对象，不使用 Markdown 代码围栏，不附解释。
+2. schemaVersion 必须是 "1.0"，kind 必须是 "life-story"。
+3. timelineType 使用 "age"；只有原作没有年龄且不能合理确定时才用 "story-time"。所有 event.time 都是同一条世界时间轴上的非负数字，不是每个人各自从 0 开始的年龄。
+4. primaryCharacterId 必须引用 characters 中存在的唯一 id。所有 characterId、fromId、toId 都必须引用已有且不重复的人物 id。
+5. characters 必填 id、name；role 可为 primary 或 companion；birthTime、endTime 为可选非负数字；initialState 可选，health/resources/mood/education/stability 取 0–1。
+6. events 至少包含 id、characterId、time、type、title、description。stateChanges 可选，仅能包含 health/resources/mood/education/stability 的 -1–1 增量。事件事实写在结构化字段中，不把规则藏进 description。
+7. 同一人物死亡事件 type="death" 后不得再有该人物事件；其他仍存人物可以继续。关系结束不等于死亡。
+8. relationships 可选；每项含 fromId、toId、startTime、endTime，startTime 不得晚于 endTime；status 可用 close/distant，endReason 可用 separation/death。
+9. 普通生活事件应多于极端事件；事件应有因果连续性，严肃内容克制表达。真实人物必须在 metadata 中以 basis 说明资料依据；无法确认的内容标为虚构，不冒充史实。
+10. 必须保留人物之间独立发生的事件，不要让伴随人物只在与主角相遇时出现。
+
+完整可导入示例：
+${JSON.stringify(AI_STORY_EXAMPLE,null,2)}
+
+现在请依据用户接下来提供的材料生成 JSON。`;

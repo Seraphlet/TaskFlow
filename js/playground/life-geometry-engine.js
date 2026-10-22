@@ -1,130 +1,99 @@
+const STATE_KEYS=['health','resources','mood','education','stability'];
 const clamp=(value,min=0,max=1)=>Math.min(max,Math.max(min,Number(value)||0));
 const copy=(value)=>JSON.parse(JSON.stringify(value));
+const finite=(value)=>Number.isFinite(Number(value));
+const isObject=(value)=>value&&typeof value==='object'&&!Array.isArray(value);
+const issue=(path,message)=>({path,message});
 
 function hash(value){let result=2166136261;for(const char of String(value)){result^=char.charCodeAt(0);result=Math.imul(result,16777619);}return result>>>0;}
 function keyedRandom(seed,key){let value=hash(`${seed}|${key}`);value+=0x6D2B79F5;value=Math.imul(value^(value>>>15),value|1);value^=value+Math.imul(value^(value>>>7),value|61);return((value^(value>>>14))>>>0)/4294967296;}
-function issue(path,message){return{path,message};}
-function isObject(value){return value&&typeof value==='object'&&!Array.isArray(value);}
+function validateUniqueIds(items,path,errors){const seen=new Set();for(const[index,item]of(items||[]).entries()){if(!item?.id)errors.push(issue(`${path}[${index}].id`,'不能为空'));else if(seen.has(item.id))errors.push(issue(`${path}[${index}].id`,`重复 ID：${item.id}`));else seen.add(item.id);}return seen;}
+function validateStateFields(value,path,errors,{delta=false}={}){for(const key of STATE_KEYS){if(value?.[key]==null)continue;const number=Number(value[key]),min=delta?-1:0,max=1;if(!Number.isFinite(number)||number<min||number>max)errors.push(issue(`${path}.${key}`,`必须是 ${min}–${max} 的数字`));}}
+function validationError(check){return new Error(check.errors.map(item=>`${item.path}：${item.message}`).join('；'));}
 
 export function validatePersonTemplate(value){
-  const errors=[];
-  if(!isObject(value))return{valid:false,errors:[issue('$','必须是 JSON 对象')]};
-  if(value.kind!=='person-template')errors.push(issue('kind','必须为 person-template'));
-  if(value.schemaVersion!=='1.0')errors.push(issue('schemaVersion','当前仅支持 1.0'));
-  if(value.mode!=='open')errors.push(issue('mode','人物模板必须为 open'));
-  if(!value.person?.id||!value.person?.name)errors.push(issue('person','需要 id 和 name'));
-  if(!Array.isArray(value.candidateEvents))errors.push(issue('candidateEvents','必须是数组'));
-  const ids=new Set([value.person?.id,...(value.relatedCharacters||[]).map(item=>item.id)]);
-  for(const [index,event] of (value.candidateEvents||[]).entries()){
-    if(!event.id||!event.type||!event.title)errors.push(issue(`candidateEvents[${index}]`,'需要 id、type 和 title'));
-    if(!Array.isArray(event.ageRange)||event.ageRange.length!==2)errors.push(issue(`candidateEvents[${index}].ageRange`,'需要 [最早年龄, 最晚年龄]'));
-    if(event.relationship?.characterId&&!ids.has(event.relationship.characterId))errors.push(issue(`candidateEvents[${index}].relationship.characterId`,'引用了不存在的人物'));
-  }
+  const errors=[];if(!isObject(value))return{valid:false,errors:[issue('$','必须是 JSON 对象')]};
+  if(value.schemaVersion!=='1.0')errors.push(issue('schemaVersion','当前仅支持 1.0'));if(value.kind!=='person-template')errors.push(issue('kind','必须为 person-template'));if(value.mode!=='open')errors.push(issue('mode','人物模板必须为 open'));
+  if(!value.person?.id)errors.push(issue('person.id','不能为空'));if(!value.person?.name)errors.push(issue('person.name','不能为空'));validateStateFields(value.person?.birthConditions,'person.birthConditions',errors);validateStateFields(value.person?.traits,'person.traits',errors);
+  if(value.person?.expectedLifespan!=null&&(!finite(value.person.expectedLifespan)||Number(value.person.expectedLifespan)<1||Number(value.person.expectedLifespan)>130))errors.push(issue('person.expectedLifespan','必须是 1–130'));
+  if(!Array.isArray(value.relatedCharacters||[]))errors.push(issue('relatedCharacters','必须是数组'));const relatedIds=validateUniqueIds(value.relatedCharacters||[],'relatedCharacters',errors),ids=new Set([value.person?.id,...relatedIds]);if(ids.size!==(value.relatedCharacters||[]).length+1)errors.push(issue('relatedCharacters','人物 ID 不能与主角重复'));
+  if(!Array.isArray(value.candidateEvents))errors.push(issue('candidateEvents','必须是数组'));validateUniqueIds(value.candidateEvents||[],'candidateEvents',errors);
+  for(const[index,event]of(value.candidateEvents||[]).entries()){const path=`candidateEvents[${index}]`;if(!event.type)errors.push(issue(`${path}.type`,'不能为空'));if(!event.title)errors.push(issue(`${path}.title`,'不能为空'));if(!Array.isArray(event.ageRange)||event.ageRange.length!==2||!event.ageRange.every(finite)||Number(event.ageRange[0])<0||Number(event.ageRange[0])>Number(event.ageRange[1]))errors.push(issue(`${path}.ageRange`,'需要合法的 [最早年龄, 最晚年龄]'));else if(finite(event.preferredAge)&&(Number(event.preferredAge)<Number(event.ageRange[0])||Number(event.preferredAge)>Number(event.ageRange[1])))errors.push(issue(`${path}.preferredAge`,'必须处于 ageRange 内'));if(event.probability!=null&&(!finite(event.probability)||Number(event.probability)<0||Number(event.probability)>1))errors.push(issue(`${path}.probability`,'必须是 0–1'));validateStateFields(event.effects,`${path}.effects`,errors,{delta:true});validateStateFields(event.fallback?.effects,`${path}.fallback.effects`,errors,{delta:true});if(event.relationship?.characterId&&!ids.has(event.relationship.characterId))errors.push(issue(`${path}.relationship.characterId`,'引用了不存在的人物'));}
+  return{valid:errors.length===0,errors};
+}
+
+export function validateLifeStory(value){
+  const errors=[];if(!isObject(value))return{valid:false,errors:[issue('$','必须是 JSON 对象')]};if(value.schemaVersion!=='1.0')errors.push(issue('schemaVersion','当前仅支持 1.0'));if(value.kind!=='life-story')errors.push(issue('kind','必须为 life-story'));if(!['age','story-time'].includes(value.timelineType))errors.push(issue('timelineType','必须为 age 或 story-time'));
+  if(!Array.isArray(value.characters)||!value.characters.length)errors.push(issue('characters','至少需要一个人物'));const ids=validateUniqueIds(value.characters||[],'characters',errors);if(!ids.has(value.primaryCharacterId))errors.push(issue('primaryCharacterId','主角引用无效'));
+  for(const[index,character]of(value.characters||[]).entries()){if(!character.name)errors.push(issue(`characters[${index}].name`,'不能为空'));if(character.birthTime!=null&&!finite(character.birthTime))errors.push(issue(`characters[${index}].birthTime`,'必须是数字'));if(character.endTime!=null&&!finite(character.endTime))errors.push(issue(`characters[${index}].endTime`,'必须是数字'));validateStateFields(character.initialState,`characters[${index}].initialState`,errors);}
+  if(!Array.isArray(value.events)||!value.events.length)errors.push(issue('events','至少需要一个事件'));validateUniqueIds(value.events||[],'events',errors);const deaths=new Map();
+  for(const[index,event]of(value.events||[]).entries()){const path=`events[${index}]`;if(!ids.has(event.characterId))errors.push(issue(`${path}.characterId`,'人物引用无效'));if(!finite(event.time)||Number(event.time)<0)errors.push(issue(`${path}.time`,'必须是非负数字'));if(!event.type)errors.push(issue(`${path}.type`,'不能为空'));if(!event.title)errors.push(issue(`${path}.title`,'不能为空'));validateStateFields(event.stateChanges,`${path}.stateChanges`,errors,{delta:true});if(event.type==='death'&&finite(event.time))deaths.set(event.characterId,Math.min(deaths.get(event.characterId)??Infinity,Number(event.time)));}
+  for(const[index,event]of(value.events||[]).entries())if(deaths.has(event.characterId)&&finite(event.time)&&Number(event.time)>deaths.get(event.characterId))errors.push(issue(`events[${index}].time`,'不能晚于该人物的死亡事件'));
+  for(const[index,relation]of(value.relationships||[]).entries()){const path=`relationships[${index}]`;if(!ids.has(relation.fromId)||!ids.has(relation.toId))errors.push(issue(path,'关系人物引用无效'));if(relation.fromId===relation.toId)errors.push(issue(path,'关系双方不能是同一人物'));if(!finite(relation.startTime)||!finite(relation.endTime)||Number(relation.startTime)>Number(relation.endTime))errors.push(issue(path,'需要合法的 startTime 和 endTime'));}
   return{valid:errors.length===0,errors};
 }
 
 export function validateLifeResult(value){
-  const errors=[];
-  if(!isObject(value))return{valid:false,errors:[issue('$','必须是 JSON 对象')]};
-  if(value.kind!=='life-result')errors.push(issue('kind','必须为 life-result'));
-  if(value.schemaVersion!=='1.0')errors.push(issue('schemaVersion','当前仅支持 1.0'));
-  if(!['age','story-time'].includes(value.timelineType))errors.push(issue('timelineType','必须为 age 或 story-time'));
-  if(!Array.isArray(value.characters)||!value.characters.length)errors.push(issue('characters','至少需要一个人物'));
-  if(!Array.isArray(value.events))errors.push(issue('events','必须是数组'));
-  if(!Number.isFinite(Number(value.endAge))||Number(value.endAge)<0)errors.push(issue('endAge','必须是非负时间终点'));
-  const ids=new Set((value.characters||[]).map(item=>item.id));
-  if(!ids.has(value.primaryCharacterId))errors.push(issue('primaryCharacterId','主角引用无效'));
-  for(const [index,event] of (value.events||[]).entries())if(!ids.has(event.characterId))errors.push(issue(`events[${index}].characterId`,'人物引用无效'));
-  for(const [index,relation] of (value.relationships||[]).entries())if(!ids.has(relation.fromId)||!ids.has(relation.toId))errors.push(issue(`relationships[${index}]`,'关系人物引用无效'));
+  const errors=[];if(!isObject(value))return{valid:false,errors:[issue('$','必须是 JSON 对象')]};if(value.schemaVersion!=='1.0')errors.push(issue('schemaVersion','当前仅支持 1.0'));if(value.kind!=='life-result')errors.push(issue('kind','必须为 life-result'));if(!['age','story-time'].includes(value.timelineType))errors.push(issue('timelineType','必须为 age 或 story-time'));if(!finite(value.endAge)||Number(value.endAge)<0)errors.push(issue('endAge','必须是非负时间终点'));
+  if(!Array.isArray(value.characters)||!value.characters.length)errors.push(issue('characters','至少需要一个人物'));const ids=validateUniqueIds(value.characters||[],'characters',errors);if(!ids.has(value.primaryCharacterId))errors.push(issue('primaryCharacterId','主角引用无效'));
+  for(const[index,character]of(value.characters||[]).entries()){const path=`characters[${index}]`;if(!character.name)errors.push(issue(`${path}.name`,'不能为空'));if(!finite(character.timelineStart)||!finite(character.timelineEnd)||Number(character.timelineStart)>Number(character.timelineEnd))errors.push(issue(path,'时间区间无效'));if(!Array.isArray(character.annualStates)||!character.annualStates.length)errors.push(issue(`${path}.annualStates`,'不能为空'));let previous=-Infinity;for(const[stateIndex,state]of(character.annualStates||[]).entries()){if(!finite(state.age)||Number(state.age)<previous)errors.push(issue(`${path}.annualStates[${stateIndex}].age`,'必须是可排序的数字'));previous=Number(state.age);validateStateFields(state,`${path}.annualStates[${stateIndex}]`,errors);}}
+  if(!Array.isArray(value.events))errors.push(issue('events','必须是数组'));let previousTime=-Infinity;const deaths=new Map();for(const[index,event]of(value.events||[]).entries()){const path=`events[${index}]`;if(!ids.has(event.characterId))errors.push(issue(`${path}.characterId`,'人物引用无效'));if(!finite(event.age)||Number(event.age)<0)errors.push(issue(`${path}.age`,'必须是非负数字'));else if(Number(event.age)<previousTime)errors.push(issue(`${path}.age`,'事件必须按时间排序'));else previousTime=Number(event.age);if(event.type==='death'&&finite(event.age))deaths.set(event.characterId,Number(event.age));}for(const[index,event]of(value.events||[]).entries())if(deaths.has(event.characterId)&&Number(event.age)>deaths.get(event.characterId))errors.push(issue(`events[${index}].age`,'不能晚于该人物的死亡事件'));
+  for(const[index,relation]of(value.relationships||[]).entries()){const path=`relationships[${index}]`;if(!ids.has(relation.fromId)||!ids.has(relation.toId))errors.push(issue(path,'关系人物引用无效'));for(const[segmentIndex,segment]of(relation.segments||[]).entries())if(!finite(segment.fromAge)||!finite(segment.toAge)||Number(segment.fromAge)>Number(segment.toAge)||Number(segment.toAge)>Number(value.endAge))errors.push(issue(`${path}.segments[${segmentIndex}]`,'关系时间范围无效'));}
   return{valid:errors.length===0,errors};
 }
 
-export function parseLifeImport(value){
-  const parsed=typeof value==='string'?JSON.parse(value):value;
-  const check=parsed?.kind==='person-template'?validatePersonTemplate(parsed):validateLifeResult(parsed);
-  if(!check.valid)throw new Error(check.errors.map(item=>`${item.path}：${item.message}`).join('；'));
-  return copy(parsed);
+function applyEffects(state,effects={}){for(const key of STATE_KEYS)if(effects[key]!=null)state[key]=clamp(state[key]+Number(effects[key]));for(const flag of effects.flags||[])state.flags.add(flag);for(const flag of effects.removeFlags||[])state.flags.delete(flag);if(effects.death)state.alive=false;}
+function stateSnapshot(state){return Object.fromEntries(STATE_KEYS.map(key=>[key,state[key]]));}
+function newState(initial={}){return{health:clamp(initial.health??.72),resources:clamp(initial.resources??.5),mood:clamp(initial.mood??.56),education:clamp(initial.education??.08),stability:clamp(initial.stability??.6),alive:true,flags:new Set()};}
+
+export function normalizeLifeStory(story){
+  const validation=validateLifeStory(story);if(!validation.valid)throw validationError(validation);const orderedEvents=copy(story.events).sort((a,b)=>Number(a.time)-Number(b.time)||a.id.localeCompare(b.id));const latestEvent=Math.max(0,...orderedEvents.map(event=>Number(event.time))),latestCharacter=Math.max(0,...story.characters.map(character=>Number(character.endTime??0))),endAge=Math.max(latestEvent,latestCharacter)+Number(story.tailDuration??2);
+  const events=orderedEvents.map(event=>({id:event.id,characterId:event.characterId,age:Number(event.time),year:event.year??null,characterAge:event.characterAge??null,type:event.type,title:event.title,description:event.description||'',resolution:'fixed',source:'import',stateChanges:copy(event.stateChanges||{})}));
+  const characters=story.characters.map(character=>{const start=Number(character.birthTime??0),death=events.find(event=>event.characterId===character.id&&event.type==='death'),timelineEnd=Math.min(Number(character.endTime??endAge),death?.age??Infinity),state=newState(character.initialState),annualStates=[{age:start,...stateSnapshot(state),alive:true}];for(const event of events.filter(item=>item.characterId===character.id&&item.age>=start&&item.age<=timelineEnd)){applyEffects(state,event.stateChanges);annualStates.push({age:event.age,...stateSnapshot(state),alive:state.alive});}if(annualStates.at(-1).age<timelineEnd)annualStates.push({age:timelineEnd,...stateSnapshot(state),alive:state.alive});return{id:character.id,name:character.name,role:character.id===story.primaryCharacterId?'primary':(character.role||'companion'),timelineStart:start,timelineEnd,lifeEndReason:death?'death':(character.lifeEndReason||'continues'),annualStates};});
+  const relationships=(story.relationships||[]).map((relation,index)=>({id:relation.id||`relation-${index}`,fromId:relation.fromId,toId:relation.toId,segments:[{fromAge:Number(relation.startTime),toAge:Number(relation.endTime),status:relation.status||'close'}],endedBy:relation.endReason||'separation'}));const result={schemaVersion:'1.0',kind:'life-result',metadata:{...copy(story.metadata||{}),mode:'fixed',dataVersion:'art-world-v2'},timelineType:story.timelineType,primaryCharacterId:story.primaryCharacterId,endAge,characters,events,relationships,candidateResolutions:[]};const resultCheck=validateLifeResult(result);if(!resultCheck.valid)throw validationError(resultCheck);return result;
 }
 
-function worldAt(world,year){
-  const result={...world.base};
-  for(const stage of world.stages||[])if(year>=stage.from&&year<=stage.to)for(const[key,value]of Object.entries(stage.modifiers||{}))result[key]=clamp((result[key]||0)+value);
-  return result;
-}
-function conditionsPass(conditions,state,world,template){
-  const checks=conditions||{};
-  if(checks.requiresFlags?.some(flag=>!state.flags.has(flag)))return false;
-  if(checks.minEducationOpportunity!=null&&world.educationOpportunity<checks.minEducationOpportunity)return false;
-  if(checks.minResources!=null&&state.resources<checks.minResources)return false;
-  if(checks.minEconomy!=null&&world.economy<checks.minEconomy)return false;
-  if(checks.minMobility!=null&&world.mobility<checks.minMobility)return false;
-  if(checks.minResilience!=null&&(template.person.traits?.resilience||0)<checks.minResilience)return false;
-  if(checks.requiresCharacter&&!template.relatedCharacters?.some(item=>item.id===checks.requiresCharacter))return false;
-  return true;
-}
-function applyEffects(state,effects={}){
-  for(const key of ['health','resources','mood','education','stability'])if(effects[key]!=null)state[key]=clamp(state[key]+effects[key]);
-  for(const flag of effects.flags||[])state.flags.add(flag);
-  for(const flag of effects.removeFlags||[])state.flags.delete(flag);
-  if(effects.death)state.alive=false;
-}
-function stateSnapshot(state){return Object.fromEntries(['health','resources','mood','education','stability'].map(key=>[key,state[key]]));}
+export function parseLifeImport(value){let parsed;try{parsed=typeof value==='string'?JSON.parse(value):value;}catch(error){throw new Error(`JSON 语法错误：${error.message}`);}if(parsed?.kind==='person-template'){const check=validatePersonTemplate(parsed);if(!check.valid)throw validationError(check);return copy(parsed);}if(parsed?.kind==='life-story')return normalizeLifeStory(parsed);const check=validateLifeResult(parsed);if(!check.valid)throw validationError(check);return copy(parsed);}
+
+function worldAt(world,year){const result={...world.base};for(const stage of world.stages||[])if(year>=stage.from&&year<=stage.to)for(const[key,value]of Object.entries(stage.modifiers||{}))result[key]=clamp((result[key]||0)+value);return result;}
+function conditionsPass(conditions,state,world,template){const checks=conditions||{};if(checks.requiresFlags?.some(flag=>!state.flags.has(flag)))return false;if(checks.excludesFlags?.some(flag=>state.flags.has(flag)))return false;if(checks.requiresAnyFlags?.length&&!checks.requiresAnyFlags.some(flag=>state.flags.has(flag)))return false;if(checks.minEducationOpportunity!=null&&world.educationOpportunity<checks.minEducationOpportunity)return false;if(checks.minResources!=null&&state.resources<checks.minResources)return false;if(checks.maxResources!=null&&state.resources>checks.maxResources)return false;if(checks.minEconomy!=null&&world.economy<checks.minEconomy)return false;if(checks.minMobility!=null&&world.mobility<checks.minMobility)return false;if(checks.minResilience!=null&&(template.person.traits?.resilience||0)<checks.minResilience)return false;if(checks.requiresCharacter&&!template.relatedCharacters?.some(item=>item.id===checks.requiresCharacter))return false;return true;}
+
+const DETAIL_RULES=[
+  {id:'family-evening',from:3,to:10,max:1,chance:.55,title:'家中的普通夜晚',type:'daily-life',description:'晚饭、灯光和熟悉的声音，构成了童年最稳定的部分。',effects:{mood:.04,stability:.04}},
+  {id:'childhood-change',from:5,to:15,max:1,chance:.3,title:'家里的生活有了变化',type:'family',description:'大人的决定改变了日常节奏，也让成长提前了一点。',effects:{mood:-.05,stability:-.06}},
+  {id:'interest',from:7,to:18,max:2,chance:.42,title:'发现一件喜欢的事',type:'growth',description:'一项不起眼的兴趣被保留下来，日后仍偶尔照亮生活。',effects:{education:.04,mood:.05,flags:['has-interest']}},
+  {id:'friendship',from:10,to:24,max:2,chance:.4,title:'一段友谊慢慢形成',type:'relationship',description:'相似的困惑让两个人开始交换秘密和勇气。',effects:{mood:.06,flags:['knows-friend']}},
+  {id:'family-duty',from:12,to:25,max:1,chance:.28,title:'开始承担家里的事情',type:'family',description:'生活没有宣布这一刻的重要性，但责任从此多了一些。',effects:{stability:.03,mood:-.025,flags:['family-duty']}},
+  {id:'first-independence',from:16,to:27,max:1,chance:.48,title:'第一次独自处理生活',type:'growth',description:'没有人替她决定下一步，这次不完美的选择仍属于自己。',effects:{stability:.04,mood:.035,flags:['independent']}},
+  {id:'job-search',from:20,to:38,max:2,chance:.46,conditions:{excludesFlags:['research-career']},title:'在工作机会之间奔走',type:'career',description:'等待、拒绝和短暂的机会交替出现，生活被一点点安排起来。',effects:{resources:.035,stability:-.02,flags:['working']}},
+  {id:'work-rhythm',from:23,to:66,max:4,chance:.38,conditions:{requiresAnyFlags:['research-career','working','career-redirected']},title:'工作成为日常的一部分',type:'daily-life',description:'多数日子没有戏剧性，只是完成事情，再带着疲惫回家。',effects:{resources:.045,mood:-.012,stability:.035}},
+  {id:'move-home',from:19,to:58,max:1,chance:.2,conditions:{minMobility:.5},title:'搬到新的住处',type:'migration',description:'纸箱被拆开后，陌生街道逐渐变成新的生活半径。',effects:{resources:-.055,stability:-.045,mood:.025,flags:['moved-home']}},
+  {id:'misunderstanding',from:20,to:65,max:2,chance:.22,conditions:{requiresAnyFlags:['knows-friend','reunited']},title:'一次没有说清的误解',type:'relationship',description:'沉默让关系拉开了距离，彼此都没有立刻找到合适的话。',effects:{mood:-.07,flags:['relationship-strained']}},
+  {id:'reconcile',from:22,to:72,max:2,chance:.34,conditions:{requiresFlags:['relationship-strained']},title:'重新把话说开',type:'relationship',description:'答案并不完美，但愿意倾听让关系重新有了余地。',effects:{mood:.075,removeFlags:['relationship-strained']}},
+  {id:'ordinary-weekend',from:24,to:82,max:5,chance:.48,title:'一个普通的休息日',type:'daily-life',description:'采购、整理和短暂发呆，没有大事发生，生活仍在缓慢向前。',effects:{mood:.025,stability:.018}},
+  {id:'minor-illness',from:28,to:82,max:2,chance:.16,title:'身体发出提醒',type:'health',description:'一段不算严重的病痛迫使生活慢下来，也改变了部分习惯。',effects:{health:-.08,mood:-.035,flags:['recovering']}},
+  {id:'recovery',from:29,to:85,max:2,chance:.5,conditions:{requiresFlags:['recovering']},title:'恢复日常节奏',type:'health',description:'身体逐渐恢复，曾被忽略的普通行动重新变得珍贵。',effects:{health:.055,mood:.045,removeFlags:['recovering']}},
+  {id:'care-family',from:34,to:78,max:2,chance:.27,title:'照料身边的人',type:'family',description:'时间被切成许多细小片段，陪伴成为一种安静的责任。',effects:{mood:-.018,stability:.025,flags:['caregiver']}},
+  {id:'learn-again',from:35,to:76,max:2,chance:.31,title:'重新学习一件事',type:'growth',description:'出于需要或好奇，她再次坐下来，从不熟悉的地方开始。',effects:{education:.055,mood:.035}},
+  {id:'neighborhood',from:38,to:84,max:3,chance:.32,title:'与附近的人渐渐熟悉',type:'community',description:'点头、问候和偶尔的帮忙，让居住的地方有了关系的纹理。',effects:{mood:.04,stability:.025}},
+  {id:'retirement',from:58,to:78,max:1,chance:.5,title:'生活的重心慢慢改变',type:'turning-point',description:'工作不再占据每天的中心，时间重新显露出不同的形状。',effects:{resources:-.025,stability:.04,flags:['retired']}},
+];
+
+function chooseDetail(age,state,world,template,seed,counts,lastByRule,lastDetailAge){if(age-lastDetailAge<2||keyedRandom(seed,`detail-gate-${age}`)>.58)return null;const eligible=DETAIL_RULES.filter(rule=>age>=rule.from&&age<=rule.to&&(counts.get(rule.id)||0)<rule.max&&age-(lastByRule.get(rule.id)??-Infinity)>=5&&conditionsPass(rule.conditions,state,world,template)&&keyedRandom(seed,`detail-${rule.id}-${age}`)<rule.chance);if(!eligible.length)return null;return eligible[Math.floor(keyedRandom(seed,`detail-pick-${age}`)*eligible.length)];}
 
 export function simulateLife(template,world,options={}){
-  const validation=validatePersonTemplate(template);if(!validation.valid)throw new Error(validation.errors.map(item=>`${item.path}：${item.message}`).join('；'));
-  if(!world?.id||!world?.base)throw new Error('世界规则缺少 id 或 base');
-  const birthYear=Number(options.birthYear)||1988,seed=String(options.seed||'life-geometry');
-  const person=template.person,initial=person.birthConditions||{};
-  const state={health:clamp(initial.health??.7),resources:clamp(initial.resources??.5),mood:clamp(initial.mood??.55),education:clamp(initial.education??.05),stability:clamp(initial.stability??.6),alive:true,flags:new Set()};
-  const events=[],annualStates=[],candidateResolutions=[],processedIncidents=new Set(),processedCandidates=new Set();
-  const addEvent=(age,event,resolution,source='candidate')=>{applyEffects(state,event.effects);events.push({id:`${source}-${event.id}-${age}`,characterId:person.id,age,year:birthYear+age,type:event.type,title:event.title,description:event.description||'',resolution,source,stateSnapshot:stateSnapshot(state)});};
-  addEvent(0,{id:'birth',type:'birth',title:`${person.name}出生`,description:'一条生命线在世界中开始延伸。',effects:{}},'preserved','system');
-  let deathAge=null;
-  const maxAge=Math.max(100,Number(person.expectedLifespan||85)+8);
-  for(let age=0;age<=maxAge&&state.alive;age++){
-    const year=birthYear+age,currentWorld=worldAt(world,year);
-    if(age===6){state.flags.add('basic-education');addEvent(age,{id:'basic-school',type:'education',title:'开始认识更大的世界',description:'阅读、游戏与身边的人构成最早的学习。',effects:{education:.08}},'preserved','system');}
-    state.health=clamp(state.health-(age>52?.006:.001)+currentWorld.medicalCare*.0015);
-    state.mood=clamp(state.mood+(keyedRandom(seed,`mood-${age}`)-.5)*.025);
-    for(const incident of world.incidents||[]){
-      if(processedIncidents.has(incident.id)||year<incident.from||year>incident.to)continue;
-      const c=incident.conditions||{};if(age<(c.minAge??0)||age>(c.maxAge??120))continue;
-      if(keyedRandom(seed,`world-${incident.id}`)<Number(incident.probability||0)){processedIncidents.add(incident.id);addEvent(age,incident,'changed','world');if(!state.alive){deathAge=age;break;}}
-    }
-    if(!state.alive)break;
-    for(const candidate of template.candidateEvents){
-      if(processedCandidates.has(candidate.id))continue;
-      const [start,end]=candidate.ageRange; if(age<start||age>end)continue;
-      const conditionsOk=conditionsPass(candidate.conditions,state,currentWorld,template);
-      const preferred=Number(candidate.preferredAge??start);
-      const chance=keyedRandom(seed,`candidate-${candidate.id}`);
-      if(conditionsOk&&age>=preferred&&chance<Number(candidate.probability??1)){
-        processedCandidates.add(candidate.id);addEvent(age,candidate,age===preferred?'preserved':'delayed');candidateResolutions.push({candidateId:candidate.id,resolution:age===preferred?'preserved':'delayed',age});if(!state.alive){deathAge=age;break;}
-      }else if(age===end){
-        processedCandidates.add(candidate.id);
-        if(candidate.fallback){addEvent(age,{id:`${candidate.id}-fallback`,...candidate.fallback},'changed');candidateResolutions.push({candidateId:candidate.id,resolution:'changed',age});}
-        else candidateResolutions.push({candidateId:candidate.id,resolution:'cancelled',age});
-      }
-    }
-    annualStates.push({age,year,...stateSnapshot(state),alive:state.alive});
-    if(!state.alive){deathAge=age;break;}
+  const validation=validatePersonTemplate(template);if(!validation.valid)throw validationError(validation);if(!world?.id||!world?.base)throw new Error('世界规则缺少 id 或 base');const birthYear=Number(options.birthYear)||1988,seed=String(options.seed||'life-geometry'),person=template.person,state=newState(person.birthConditions),events=[],annualStates=[],candidateResolutions=[],processedIncidents=new Set(),processedCandidates=new Set(),detailCounts=new Map(),detailLast=new Map();let lastDetailAge=-Infinity;
+  const addEvent=(age,event,resolution,source='candidate')=>{applyEffects(state,event.effects);events.push({id:`${source}-${event.id}-${age}`,characterId:person.id,age,characterAge:age,year:birthYear+age,type:event.type,title:event.title,description:event.description||'',resolution,source,stateSnapshot:stateSnapshot(state)});};addEvent(0,{id:'birth',type:'birth',title:`${person.name}出生`,description:'一条生命线在世界中开始延伸。',effects:{}},'preserved','system');let deathAge=null;const maxAge=Math.max(100,Number(person.expectedLifespan||85)+8);
+  for(let age=0;age<=maxAge&&state.alive;age++){const year=birthYear+age,currentWorld=worldAt(world,year);if(age===6){state.flags.add('basic-education');addEvent(age,{id:'basic-school',type:'education',title:'开始认识更大的世界',description:'阅读、游戏与身边的人构成最早的学习。',effects:{education:.08}},'preserved','system');}state.health=clamp(state.health-(age>52?.006:.001)+currentWorld.medicalCare*.0015);state.mood=clamp(state.mood+(keyedRandom(seed,`mood-${age}`)-.5)*.025);const eventsBefore=events.length;
+    for(const incident of world.incidents||[]){if(processedIncidents.has(incident.id)||year<incident.from||year>incident.to)continue;const c=incident.conditions||{};if(age<(c.minAge??0)||age>(c.maxAge??120))continue;if(keyedRandom(seed,`world-${incident.id}-${year}`)<Number(incident.probability||0)){processedIncidents.add(incident.id);addEvent(age,incident,'changed','world');if(!state.alive){deathAge=age;break;}}}if(!state.alive)break;
+    for(const candidate of template.candidateEvents){if(processedCandidates.has(candidate.id))continue;const[start,end]=candidate.ageRange;if(age<start||age>end)continue;const conditionsOk=conditionsPass(candidate.conditions,state,currentWorld,template),preferred=Number(candidate.preferredAge??start),chance=keyedRandom(seed,`candidate-${candidate.id}`);if(conditionsOk&&age>=preferred&&chance<Number(candidate.probability??1)){processedCandidates.add(candidate.id);addEvent(age,candidate,age===preferred?'preserved':'delayed');candidateResolutions.push({candidateId:candidate.id,resolution:age===preferred?'preserved':'delayed',age});if(!state.alive){deathAge=age;break;}}else if(age===end){processedCandidates.add(candidate.id);if(candidate.fallback){addEvent(age,{id:`${candidate.id}-fallback`,...candidate.fallback},'changed');candidateResolutions.push({candidateId:candidate.id,resolution:'changed',age});}else candidateResolutions.push({candidateId:candidate.id,resolution:'cancelled',age});}}
+    if(state.alive&&events.length===eventsBefore){const detail=chooseDetail(age,state,currentWorld,template,seed,detailCounts,detailLast,lastDetailAge);if(detail){addEvent(age,detail,'generated','daily');detailCounts.set(detail.id,(detailCounts.get(detail.id)||0)+1);detailLast.set(detail.id,age);lastDetailAge=age;}}annualStates.push({age,characterAge:age,year,...stateSnapshot(state),alive:state.alive});if(!state.alive){deathAge=age;break;}
   }
-  deathAge=deathAge??annualStates.at(-1)?.age??0;
-  for(const candidate of template.candidateEvents)if(!processedCandidates.has(candidate.id))candidateResolutions.push({candidateId:candidate.id,resolution:'terminated',age:deathAge,reason:'primary-death'});
-  const characters=[{id:person.id,name:person.name,role:'primary',timelineStart:0,timelineEnd:deathAge,lifeEndReason:events.at(-1)?.type==='death'?'death':'end',annualStates}];
-  const relationships=[];
-  for(const companion of template.relatedCharacters||[]){
-    const startAge=Math.max(5,12+Math.round(keyedRandom(seed,`meet-${companion.id}`)*8));
-    const naturalEnd=Math.max(startAge+8,Number(companion.expectedLifespan||80)-Number(companion.birthOffset||0));
-    const timelineEnd=Math.min(Math.max(deathAge+5,startAge+10),naturalEnd);
-    const companionStates=[];
-    for(let age=startAge;age<=timelineEnd;age++)companionStates.push({age,year:birthYear+age,health:clamp((companion.health||.72)-Math.max(0,age-55)*.008),resources:clamp(.45+keyedRandom(seed,`${companion.id}-resources-${age}`)*.2),mood:clamp(.48+keyedRandom(seed,`${companion.id}-mood-${age}`)*.24),education:.45,stability:.58,alive:true});
-    characters.push({id:companion.id,name:companion.name,role:'companion',timelineStart:startAge,timelineEnd,lifeEndReason:timelineEnd>deathAge?'continues':'death',annualStates:companionStates});
-    events.push({id:`meet-${companion.id}`,characterId:companion.id,age:startAge,year:birthYear+startAge,type:'relationship',title:`遇见${companion.name}`,description:'两条生命线短暂靠近，彼此改变了方向。',resolution:'generated'});
-    const separationAge=Math.min(timelineEnd,startAge+14);
-    relationships.push({id:`relation-${person.id}-${companion.id}`,fromId:person.id,toId:companion.id,segments:[{fromAge:startAge,toAge:separationAge,status:'close'},{fromAge:separationAge,toAge:Math.min(deathAge,timelineEnd),status:'distant'}],endedBy:deathAge<=timelineEnd?'primary-death':'separation'});
+  deathAge=deathAge??annualStates.at(-1)?.age??0;for(const candidate of template.candidateEvents)if(!processedCandidates.has(candidate.id))candidateResolutions.push({candidateId:candidate.id,resolution:'terminated',age:deathAge,reason:'primary-death'});const characters=[{id:person.id,name:person.name,role:'primary',birthYear,timelineStart:0,timelineEnd:deathAge,lifeEndReason:events.find(event=>event.characterId===person.id&&event.type==='death')?'death':'end',annualStates}],relationships=[];
+  for(const companion of template.relatedCharacters||[]){const birthOffset=Number(companion.birthOffset||0),companionBirthYear=birthYear+birthOffset,timelineStart=Math.max(0,birthOffset),meetTime=Math.max(timelineStart+8,12+Math.round(keyedRandom(seed,`meet-${companion.id}`)*9)),naturalEnd=birthOffset+Number(companion.expectedLifespan||80),timelineEnd=Math.max(meetTime+10,Math.min(naturalEnd,Math.max(deathAge+6,meetTime+18))),companionState=newState({health:companion.health??.72,resources:companion.resources??.48,mood:.56,education:.08,stability:.58}),companionStates=[],companionEvents=[];let lastEvent=-Infinity;
+    const addCompanionEvent=(time,event)=>{applyEffects(companionState,event.effects);const characterAge=time-birthOffset;companionEvents.push({id:`companion-${companion.id}-${event.id}-${time}`,characterId:companion.id,age:time,characterAge,year:birthYear+time,type:event.type,title:event.title,description:event.description,resolution:'generated',source:'companion',stateSnapshot:stateSnapshot(companionState)});lastEvent=time;};if(birthOffset>=0)addCompanionEvent(birthOffset,{id:'birth',type:'birth',title:`${companion.name}出生`,description:'同一世界里，另一条生命线也开始生长。',effects:{}});
+    for(let time=timelineStart;time<=timelineEnd;time++){const characterAge=time-birthOffset,currentWorld=worldAt(world,birthYear+time);companionState.health=clamp(companionState.health-(characterAge>55?.006:.001)+currentWorld.medicalCare*.0012);if(characterAge===6)addCompanionEvent(time,{id:'school',type:'education',title:`${companion.name}开始上学`,description:'新的同伴和规则进入了日常生活。',effects:{education:.09}});if(characterAge===17)addCompanionEvent(time,{id:'direction',type:'growth',title:`${companion.name}选择自己的方向`,description:currentWorld.educationOpportunity>.5?'继续学习成为眼前更可行的道路。':'环境让求学变得困难，只能更早面对生活。',effects:currentWorld.educationOpportunity>.5?{education:.18}:{resources:.04,stability:-.04}});if(characterAge===23)addCompanionEvent(time,{id:'work',type:'career',title:`${companion.name}找到一份工作`,description:'工作并不传奇，却让生活第一次有了较稳定的节奏。',effects:{resources:.12,stability:.07,flags:['working']}});if(time===meetTime)addCompanionEvent(time,{id:'meet',type:'relationship',title:`${person.name}与${companion.name}相遇`,description:'两条各自生长的生命线在这一年靠近。',effects:{mood:.07}});if(characterAge>9&&time-lastEvent>=4&&keyedRandom(seed,`${companion.id}-detail-${time}`)<.2){const phase=characterAge<20?['在兴趣里找到伙伴','在一次争执后学会道歉']:characterAge<55?['适应新的生活节奏','在另一座城市重新安顿','把普通日子慢慢过稳']:['开始照顾身体','与旧日朋友重新联系','享受一个安静的下午'],title=phase[Math.floor(keyedRandom(seed,`${companion.id}-title-${time}`)*phase.length)];addCompanionEvent(time,{id:'daily',type:'daily-life',title:`${companion.name}：${title}`,description:'这不是宏大的转折，却真实改变了接下来的生活质地。',effects:{mood:(keyedRandom(seed,`${companion.id}-effect-${time}`)-.45)*.08,stability:.018}});}companionStates.push({age:time,characterAge,year:birthYear+time,...stateSnapshot(companionState),alive:companionState.alive});}
+    characters.push({id:companion.id,name:companion.name,role:'companion',birthYear:companionBirthYear,timelineStart,timelineEnd,lifeEndReason:timelineEnd>=naturalEnd?'death':'continues',annualStates:companionStates});events.push(...companionEvents);const separationTime=Math.min(timelineEnd,meetTime+12),canReunite=timelineEnd-separationTime>10&&keyedRandom(seed,`reunion-${companion.id}`)>.38,segments=[{fromAge:meetTime,toAge:separationTime,status:'close'}];if(canReunite){const reunionTime=Math.min(timelineEnd-2,separationTime+7+Math.round(keyedRandom(seed,`reunion-time-${companion.id}`)*7));segments.push({fromAge:separationTime,toAge:reunionTime,status:'distant'},{fromAge:reunionTime,toAge:Math.min(timelineEnd,deathAge),status:'close'});events.push({id:`reunion-${companion.id}`,characterId:companion.id,age:reunionTime,characterAge:reunionTime-birthOffset,year:birthYear+reunionTime,type:'relationship',title:`${person.name}与${companion.name}重逢`,description:'多年各自生活后，两条线再次短暂靠近。',resolution:'generated',source:'companion'});}else segments.push({fromAge:separationTime,toAge:Math.min(timelineEnd,deathAge),status:'distant'});relationships.push({id:`relation-${person.id}-${companion.id}`,fromId:person.id,toId:companion.id,segments,endedBy:deathAge<=timelineEnd?'primary-death':'separation'});
   }
-  events.sort((a,b)=>a.age-b.age||a.id.localeCompare(b.id));
-  const endAge=Math.max(deathAge,...characters.map(item=>item.timelineEnd));
-  return{schemaVersion:'1.0',kind:'life-result',metadata:{title:`${person.name}的一生`,mode:'open',fictional:Boolean(template.metadata?.fictional),basis:world.basis||'artistic-simulation',worldId:world.id,worldLabel:world.label,birthYear,seed,dataVersion:'art-world-v1'},timelineType:'age',primaryCharacterId:person.id,characters,events,relationships,candidateResolutions,endAge};
+  events.sort((a,b)=>a.age-b.age||a.id.localeCompare(b.id));const endAge=Math.max(deathAge,...characters.map(item=>item.timelineEnd));return{schemaVersion:'1.0',kind:'life-result',metadata:{title:`${person.name}的一生`,mode:'open',fictional:Boolean(template.metadata?.fictional),basis:world.basis||'artistic-simulation',worldId:world.id,worldLabel:world.label,birthYear,seed,dataVersion:'art-world-v2'},timelineType:'age',primaryCharacterId:person.id,characters,events,relationships,candidateResolutions,endAge};
 }
