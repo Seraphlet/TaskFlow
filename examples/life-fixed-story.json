@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1.0",
+  "kind": "life-result",
+  "metadata": { "title": "两盏灯", "mode": "fixed", "fictional": true, "basis": "fictional-fixed-story", "worldId": "fixed-story", "birthYear": 2000, "seed": "fixed", "dataVersion": "art-world-v1" },
+  "timelineType": "story-time",
+  "primaryCharacterId": "a",
+  "endAge": 4,
+  "characters": [
+    { "id": "a", "name": "阿澜", "role": "primary", "timelineStart": 0, "timelineEnd": 3, "lifeEndReason": "departure", "annualStates": [{ "age": 0, "health": 0.8, "resources": 0.5, "mood": 0.6, "education": 0.2, "stability": 0.6 }, { "age": 3, "health": 0.8, "resources": 0.5, "mood": 0.7, "education": 0.3, "stability": 0.7 }] },
+    { "id": "b", "name": "小舟", "role": "companion", "timelineStart": 1, "timelineEnd": 4, "lifeEndReason": "continues", "annualStates": [{ "age": 1, "health": 0.8, "resources": 0.5, "mood": 0.6, "education": 0.2, "stability": 0.6 }, { "age": 4, "health": 0.8, "resources": 0.5, "mood": 0.55, "education": 0.3, "stability": 0.6 }] }
+  ],
+  "events": [
+    { "id": "f1", "characterId": "a", "age": 0, "year": null, "type": "beginning", "title": "第一章", "description": "两盏灯在雨夜里第一次照见彼此。", "resolution": "fixed" },
+    { "id": "f2", "characterId": "a", "age": 2, "year": null, "type": "relationship", "title": "同行", "description": "他们走过一段并不漫长的路。", "resolution": "fixed" },
+    { "id": "f3", "characterId": "a", "age": 3, "year": null, "type": "separation", "title": "分别", "description": "其中一盏灯转向远处，另一盏仍继续发亮。", "resolution": "fixed" }
+  ],
+  "relationships": [{ "id": "r1", "fromId": "a", "toId": "b", "segments": [{ "fromAge": 1, "toAge": 3, "status": "close" }], "endedBy": "separation" }],
+  "candidateResolutions": []
+}

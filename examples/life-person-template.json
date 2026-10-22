@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "kind": "person-template",
+  "mode": "open",
+  "metadata": { "title": "许舟的候选人生", "fictional": true, "basis": "artistic-simulation" },
+  "person": {
+    "id": "xu-zhou", "name": "许舟", "region": "虚构潮港", "expectedLifespan": 85,
+    "birthConditions": { "health": 0.82, "resources": 0.62, "mood": 0.6, "education": 0.05, "stability": 0.7 },
+    "traits": { "curiosity": 0.78, "resilience": 0.72, "sociability": 0.56 }
+  },
+  "relatedCharacters": [{ "id": "an", "name": "安", "role": "旧友", "birthOffset": 0, "health": 0.76, "expectedLifespan": 80 }],
+  "candidateEvents": [
+    {
+      "id": "university", "type": "education", "title": "进入大学", "description": "新的知识打开了更远的路。",
+      "preferredAge": 18, "ageRange": [18, 22], "probability": 0.9,
+      "conditions": { "minEducationOpportunity": 0.5, "minResources": 0.3, "requiresFlags": ["basic-education"] },
+      "effects": { "education": 0.3, "resources": -0.08, "flags": ["university"] },
+      "fallback": { "type": "education-alternative", "title": "改以自学继续", "description": "原定道路关闭后，学习以另一种形式继续。", "effects": { "education": 0.12, "flags": ["alternative-education"] } }
+    },
+    {
+      "id": "career", "type": "career", "title": "开始专业工作", "description": "学习转化成一份长期工作。",
+      "preferredAge": 25, "ageRange": [24, 31], "probability": 0.85,
+      "conditions": { "requiresFlags": ["university"], "minEconomy": 0.45 },
+      "effects": { "resources": 0.18, "stability": 0.12, "flags": ["professional-career"] }
+    },
+    {
+      "id": "natural-death", "type": "death", "title": "自然离世", "description": "漫长的一生平静结束。",
+      "preferredAge": 85, "ageRange": [80, 92], "probability": 1,
+      "conditions": {}, "effects": { "death": true }
+    }
+  ]
+}

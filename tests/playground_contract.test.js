@@ -5,14 +5,16 @@ const index = fs.readFileSync('index.html', 'utf8');
 const app = fs.readFileSync('js/app.js', 'utf8');
 const music = fs.readFileSync('js/playground/music-geometry.js', 'utf8');
 const keyboard = fs.readFileSync('js/playground/keyboard-art.js', 'utf8');
+const life = fs.readFileSync('js/playground/life-geometry.js', 'utf8');
 
 assert.strictEqual(index.includes('music-geometry.js'), false, 'music module must not be statically loaded');
 assert.strictEqual(index.includes('keyboard-art.js'), false, 'keyboard module must not be statically loaded');
+assert.strictEqual(index.includes('life-geometry.js'), false, 'life module must not be statically loaded');
 assert.match(app, /import\(modulePath\)/, 'artwork modules must use dynamic import()');
 assert.match(app, /artworkLoadToken/, 'dynamic loads must be protected against stale completion');
 assert.match(app, /destroyActiveArtwork\(\)/, 'render boundaries must destroy the previous artwork');
 
-for (const [name, source] of [['music', music], ['keyboard', keyboard]]) {
+for (const [name, source] of [['music', music], ['keyboard', keyboard], ['life', life]]) {
   assert.match(source, /export function createArtwork\(container\)/, `${name} must export createArtwork`);
   assert.match(source, /\bstart\b/, `${name} must expose start`);
   assert.match(source, /\bpause\b/, `${name} must expose pause`);
@@ -20,7 +22,7 @@ for (const [name, source] of [['music', music], ['keyboard', keyboard]]) {
   assert.match(source, /cancelAnimationFrame/, `${name} must cancel animation frames`);
   assert.match(source, /ResizeObserver/, `${name} must manage canvas resize`);
   assert.match(source, /visibilitychange/, `${name} must react to tab visibility`);
-  assert.doesNotMatch(source, /from\s+['"]|require\(/, `${name} must not introduce runtime dependencies`);
+  if (name !== 'life') assert.doesNotMatch(source, /from\s+['"]|require\(/, `${name} must not introduce runtime dependencies`);
 }
 
 assert.match(music, /new AudioContextClass\(\)/, 'AudioContext must be created lazily in the artwork module');
@@ -35,13 +37,13 @@ assert.match(music, /analyser\.fftSize=1024/, 'music analysis must use the inten
 assert.match(music, /ANALYSIS_INTERVAL_MS = 40/, 'audio features must update independently near 25 Hz');
 assert.match(music, /phase:'entering'/, 'companion lines must enter through an explicit lifecycle');
 assert.match(music, /line\.phase='leaving'/, 'companion lines must leave through an explicit lifecycle');
-assert.match(music, /timer\.activeMs>=720/, 'single-frame changes must not create companion lines');
-assert.match(music, /timer\.inactiveMs>=1450/, 'single-frame silence must not remove companion lines');
+assert.match(music, /MAX_COMPANIONS = 3/, 'music must cap dynamic companion ribbons at three');
+assert.match(music, /timer\.activeMs>=900/, 'single-frame changes must not create companion ribbons');
+assert.match(music, /timer\.inactiveMs>=2200/, 'stable layers must not disappear when the baseline adapts');
 assert.match(music, /mode==='rest'/, 'ended input must enter a tail-decay state');
-assert.match(music, /area\.center\+Math\.sin\(line\.oscPhase\+phaseModulation\)\*lineAmplitude/, 'every companion line must cross the shared horizontal axis');
-assert.doesNotMatch(music, /laneOffset/, 'companion lines must not be separated into fixed vertical lanes');
-assert.match(music, /travelPace\/Math\.max\(24,amplitudeTarget\)/, 'larger amplitude must create a naturally longer crossing period');
-assert.match(music, /\(area\.bottom-area\.top\)\*\.46/, 'companion amplitude bounds must use finite plot dimensions');
+assert.match(music, /novelty=Math\.max\(0,value-baseline\)/, 'new layers must be compared with a stable recent baseline');
+assert.match(music, /function drawRibbon/, 'each logical layer must render as a bundle of nearby fine lines');
+assert.match(music, /organicMain/, 'main ribbon must use organic compound motion');
 assert.doesNotMatch(music, /area\.bottom-area-top/, 'companion coordinates must not contain the invalid height expression');
 assert.match(keyboard, /const KEYS = \['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K'\]/, 'keyboard mapping must expose A-K effects');
 assert.match(keyboard, /MAX_MARKS = 900/, 'keyboard artwork must cap visual entities');
@@ -50,5 +52,8 @@ assert.match(keyboard, /createDynamicsCompressor/, 'keyboard audio must protect 
 assert.match(keyboard, /data-mute/, 'keyboard artwork must provide mute control');
 assert.match(keyboard, /data-volume/, 'keyboard artwork must provide volume control');
 assert.match(keyboard, /input, textarea, select/, 'keyboard artwork must ignore text inputs');
+assert.match(life, /simulateLife\(template,world/, 'life artwork must render simulation results instead of deciding events in Canvas');
+assert.match(life, /new Audio\(\)/, 'life artwork must provide independent local background audio');
+assert.doesNotMatch(life, /AnalyserNode|createAnalyser/, 'life background music must not affect simulation or curves');
 
 console.log('Playground lifecycle and cold-start contract tests passed');

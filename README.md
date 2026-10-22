@@ -17,7 +17,7 @@ location = /taskflow/images/home-background.webp {
 
 ## 运行
 
-直接双击项目根目录中的 `index.html` 仍可使用原有工作台功能。Playground 的两个作品按任务要求使用 ES Module `import()`；Chrome、Edge 等浏览器会阻止 `file://` 页面加载本地模块，因此使用 Playground 时请启动下方任一 HTTP 服务。
+直接双击项目根目录中的 `index.html` 仍可使用原有工作台功能。Playground 的三个作品按任务要求使用 ES Module `import()`；Chrome、Edge 等浏览器会阻止 `file://` 页面加载本地模块，因此使用 Playground 时请启动下方任一 HTTP 服务。
 
 双击模式下 Radar 使用内置 Demo Provider。要使用真实联网推荐，请安装 Python 3.11+ 并启动同源服务：
 
@@ -47,7 +47,9 @@ js/storage.js           IndexedDB Local Adapter 与 Remote Adapter 边界
 js/notifications.js     通知事件、纯文本格式与未配置适配器
 js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版本兼容
 js/radar.js             Radar Item 模型、演示 Provider 与生成边界
-js/playground/           按需加载的 Music Geometry 与 Keyboard Art 独立作品
+js/playground/           按需加载的 Music、Keyboard 与 Life Geometry 独立作品及人生引擎
+docs/                   Life Geometry JSON 契约说明
+examples/               可直接导入的人物模板与固定故事 JSON
 server/app.py           FastAPI 静态入口、Tavily 搜索、DeepSeek 生成及生命周期存储
 server/security.py      模型 ID 校验、凭证身份与内容指纹
 requirements.txt        可选 Radar 后端依赖
@@ -58,8 +60,9 @@ tests/                  凭证安全、模型校验和 API 边界测试
 
 进入“数字艺术”只显示作品列表，不请求作品模块。选择作品后，`app.js` 才通过动态 `import()` 加载对应模块；同时最多保留一个实例。每个作品都实现 `createArtwork(container)`，并返回 `start()`、`pause()`、`destroy()`。切换作品、返回列表或离开 Playground 时会取消动画帧、停止音频、移除键盘和页面可见性监听、断开观察器并释放大规模轨迹引用。
 
-- Music Geometry V2《音乐的一生》默认以明确标注的虚拟信号演示。主线随音乐连续向右生长，声音层次通过带滞回的伴随线渐入、持续与渐出，输入结束后尾迹自然消散。主要入口通过 `getDisplayMedia()` 让用户主动选择音乐标签页并共享音频；捕获流只连接分析器，不连接扬声器，避免重复声音或回声。浏览器不支持、用户取消或没有共享音频时会给出明确提示；本地文件仍作为备用入口。
+- Music Geometry V2.2《音乐的一生》以一束主丝带和最多三束动态伴随丝带表现音乐。每束由共享趋势的相近细线组成；伴随层次只有在当前频段相对长期基准持续变化后才进入，并通过独立滞回自然退出。音量、节奏密度和频谱层次分别控制张力、周期与层次，不把音量等同于丰富度。标签页捕获、本地文件、演示、尾迹和资源释放能力保持不变。
 - Keyboard Art 仅在作品运行时监听 A–K，输入框和可编辑区域不会触发绘画；长按有节流，画面实体有硬上限。首次按键时才创建 Web Audio 上下文，通过振荡器合成八类轻量音效，并提供静音和音量控制；同时发声数有上限。
+- Life Geometry《万千人生》把人物模板、世界规则、确定性推演和 Canvas 渲染分离。同一人物可更换出生年份和虚构世界重复推演；候选事件支持保留、推迟、改变、取消与死亡终止。固定故事共用结果渲染器但不会被时代改写。关联人物拥有独立时间线，主角死亡后世界仍可继续一小段。作品支持本地 JSON 导入、事件节点查看和完全独立的本地背景音乐。格式契约见 `docs/life-geometry-json.md`。
 
 标签页捕获依赖浏览器共享授权，不能静默启动。建议使用最新版桌面版 Chrome 或 Edge，并在共享选择器中选择浏览器标签页、勾选“共享标签页音频”。Firefox、Safari、移动端浏览器以及某些操作系统共享目标可能不提供音频轨道，此时使用演示或本地文件模式。
 

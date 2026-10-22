@@ -24,8 +24,9 @@ let homeClockTimer = null;
 let activeArtwork = null;
 let artworkLoadToken = 0;
 const PLAYGROUND_MODULES = {
-  music: './playground/music-geometry.js?v=20261019-music-life-v2-6-5',
-  keyboard: './playground/keyboard-art.js?v=20261019-playground-v1-1',
+  music: './playground/music-geometry.js?v=20261022-music-v2-2',
+  keyboard: './playground/keyboard-art.js?v=20261022-life-v1',
+  life: './playground/life-geometry.js?v=20261022-life-v1',
 };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
@@ -175,7 +176,8 @@ function toast(message, type = '') {
 
 function shell(content, title, subtitle) {
   const homeClass = state.route === 'home' ? ' home-shell' : '';
-  return `<div class="app-shell${homeClass}">
+  const playgroundClass = state.route === 'playground' ? ' playground-shell' : '';
+  return `<div class="app-shell${homeClass}${playgroundClass}">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div><div><h1>TaskFlow</h1><small>个人工作台</small></div></div>
       <div class="nav-kicker">工作空间</div>
@@ -264,10 +266,13 @@ function homePage() {
 }
 
 function playgroundPage() {
-  if (state.playgroundView === 'music' || state.playgroundView === 'keyboard') {
-    const isMusic = state.playgroundView === 'music';
-    const title = isMusic ? 'Music Geometry' : 'Keyboard Art';
-    const subtitle = isMusic ? '让一首音乐从诞生、生长到消散' : '用 A–K 键生成光线、粒子与数学花纹';
+  const works = {
+    music:{title:'Music Geometry',subtitle:'让一首音乐化为自然展开与收束的有机丝带'},
+    keyboard:{title:'Keyboard Art',subtitle:'用 A–K 键生成光线、粒子与数学花纹'},
+    life:{title:'Life Geometry · 万千人生',subtitle:'旁观生命在不同世界与时代中相遇、转折和远去'},
+  };
+  if (works[state.playgroundView]) {
+    const { title, subtitle } = works[state.playgroundView];
     return shell(`<section class="page playground-page playground-work-page">
       <div class="playground-work-head">
         <button class="btn" type="button" data-playground-back>← 返回作品列表</button>
@@ -279,7 +284,7 @@ function playgroundPage() {
     </section>`, 'Playground', `数字艺术实验室 · ${title}`);
   }
   return shell(`<section class="page playground-page">
-    <div class="page-head playground-intro"><div><span class="eyebrow">DIGITAL ART LAB</span><h3>让代码暂时离开效率</h3><p>两个独立的实时画布，只在你选择作品后加载和运行。</p></div><span class="playground-cold-badge">按需唤醒</span></div>
+    <div class="page-head playground-intro"><div><span class="eyebrow">DIGITAL ART LAB</span><h3>让代码暂时离开效率</h3><p>三个独立的实时作品，只在你选择后加载和运行。</p></div><span class="playground-cold-badge">按需唤醒</span></div>
     <div class="playground-grid">
       <article class="playground-card playground-card-music">
         <div class="playground-card-art" aria-hidden="true"><i></i><i></i><i></i><span>∿</span></div>
@@ -288,6 +293,10 @@ function playgroundPage() {
       <article class="playground-card playground-card-keyboard">
         <div class="playground-card-art keyboard-preview" aria-hidden="true"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><kbd>F</kbd><span>✦</span></div>
         <div class="playground-card-copy"><span class="home-card-kicker">KEYS × GENERATIVE ART</span><h4>Keyboard Art</h4><p>敲击 A–K，让不同规则生成光点、花纹与丝线，并以柔和的合成音效回应每次创作。</p><ul><li>8 种视听效果</li><li>静音与音量控制</li><li>粒子和声部保护</li></ul><button class="btn primary" type="button" data-playground-open="keyboard">进入作品 →</button></div>
+      </article>
+      <article class="playground-card playground-card-life">
+        <div class="playground-card-art life-preview" aria-hidden="true"><i></i><i></i><i></i><span>∞</span></div>
+        <div class="playground-card-copy"><span class="home-card-kicker">LIFE × TIME × WORLD</span><h4>Life Geometry · 万千人生</h4><p>让同一人物走入不同年份与世界，观看候选经历如何被保留、推迟、改变或终止。</p><ul><li>可复现人生推演</li><li>人物关系伴线</li><li>JSON 导入与固定故事</li></ul><button class="btn primary" type="button" data-playground-open="life">进入作品 →</button></div>
       </article>
     </div>
     <p class="playground-footnote">作品模块不会在首页或此列表页预加载；离开作品后动画、音频和输入监听会停止。</p>
@@ -462,6 +471,7 @@ async function startNewNote() {
   state.noteId=noteId; state.noteDraft=draft; state.noteDraftRevision=1;
   state.noteDraftRestored=false;
   await notesDrafts.save(draft);
+  state.route='notes';
   persistNotesUi(true);
   render();
 }

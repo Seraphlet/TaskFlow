@@ -1,4 +1,4 @@
-const MAX_COMPANIONS = 7;
+const MAX_COMPANIONS = 3;
 const MAX_POINTS_PER_LINE = 1100;
 const ANALYSIS_INTERVAL_MS = 40;
 const POINT_INTERVAL = 1 / 30;
@@ -119,27 +119,20 @@ function demoFeatures(now) {
   else if(seconds>=32){const p=1-(seconds-32)/10;energy=.06+p*.3;richness=.1+p*.5;onset=.06+p*.22;low=.05+p*.26;mid=.06+p*.31;high=.03+p*.23;}
   const pulse=Math.max(0,Math.sin(seconds*(2.1+onset*5)))*onset*.18;
   const medium={energy:clamp(energy),low:clamp(low),mid:clamp(mid),high:clamp(high),flux:clamp(onset*.38+pulse),centroid:clamp(.26+high*.55),richness:clamp(richness)};
-  return {raw:{...medium,energy:clamp(energy+pulse)},short:{...medium,energy:clamp(energy+pulse),flux:clamp(onset*.48+pulse)},medium,long:{...medium,energy:clamp(energy*.88)},onsetDensity:clamp(onset),silenceSeconds:0};
+  return {raw:{...medium,energy:clamp(energy+pulse)},short:{...medium,energy:clamp(energy+pulse),flux:clamp(onset*.48+pulse)},medium,long:{...medium,energy:clamp(energy*.88),low:clamp(low*.78),mid:clamp(mid*.75),high:clamp(high*.68),richness:clamp(richness*.7)},onsetDensity:clamp(onset),silenceSeconds:0};
 }
 
 const COMPANION_DEFINITIONS = [
-  {id:'low-a',featureSource:'low',priority:1,on:.10,off:.055,amplitudeScale:1.12,hue:190,phase:.3},
-  {id:'mid-a',featureSource:'mid',priority:2,on:.10,off:.055,amplitudeScale:.88,hue:220,phase:1.7},
-  {id:'high-a',featureSource:'high',priority:3,on:.09,off:.045,amplitudeScale:.62,hue:274,phase:2.8},
-  {id:'rich-a',featureSource:'richness',priority:4,on:.34,off:.23,amplitudeScale:.76,hue:326,phase:4.1},
-  {id:'low-b',featureSource:'low',priority:5,on:.31,off:.20,amplitudeScale:.94,hue:176,phase:5.2},
-  {id:'mid-b',featureSource:'mid',priority:6,on:.29,off:.18,amplitudeScale:.72,hue:240,phase:6.3},
-  {id:'high-b',featureSource:'high',priority:7,on:.25,off:.15,amplitudeScale:.54,hue:294,phase:7.5},
-  {id:'rich-b',featureSource:'richness',priority:8,on:.58,off:.43,amplitudeScale:.68,hue:342,phase:8.8},
-  {id:'pulse-a',featureSource:'onsetDensity',priority:9,on:.44,off:.27,amplitudeScale:.48,hue:32,phase:9.7},
-  {id:'pulse-b',featureSource:'onsetDensity',priority:10,on:.69,off:.48,amplitudeScale:.42,hue:58,phase:11.1},
+  {id:'low-layer',featureSource:'low',on:.13,off:.065,rise:.026,amplitudeScale:1.05,hue:186,phase:.35},
+  {id:'mid-layer',featureSource:'mid',on:.15,off:.075,rise:.03,amplitudeScale:.82,hue:225,phase:2.1},
+  {id:'high-layer',featureSource:'high',on:.13,off:.06,rise:.035,amplitudeScale:.62,hue:285,phase:4.35},
 ];
 
 export function createArtwork(container) {
   container.innerHTML=`<section class="artwork artwork-music">
     <div class="artwork-toolbar"><div class="artwork-status"><span class="artwork-mode" data-mode>演示信号 · 非音频分析</span><small data-file>尚未连接音频</small></div><div class="artwork-controls"><button class="btn primary" type="button" data-capture>捕获音乐标签页</button><button class="btn" type="button" data-play>暂停演示</button><label class="btn artwork-file" for="music-file">备用：本地文件<input id="music-file" type="file" accept="audio/*"></label><button class="btn" type="button" data-reset>重置轨迹</button></div></div>
     <div class="artwork-canvas-shell"><canvas aria-label="音乐的一生连续生命轨迹"></canvas><div class="artwork-legend"><span><i class="legend-energy"></i>音乐主线</span><span><i class="legend-low"></i>声音层次</span><span><i class="legend-change"></i>变化细节</span></div><div class="artwork-readout" data-scene>平缓生长</div></div>
-    <p class="artwork-help" data-message>演示模式以虚拟特征展示从平静、展开到收束的连续轨迹。每条线穿越同一横轴；振幅决定路程，节奏密度决定运动速度，因此会形成多种生命节奏。</p>
+    <p class="artwork-help" data-message>演示模式以虚拟特征展示从平静、展开到收束的连续轨迹。主丝带始终存在；相对稳定基准持续出现的新频段会形成最多三束伴随丝带。</p>
   </section>`;
 
   const canvas=container.querySelector('canvas');const context=canvas.getContext('2d',{alpha:false});
@@ -163,10 +156,10 @@ export function createArtwork(container) {
 
   function updateCompanions(delta,now,allowEntering){
     for(const definition of COMPANION_DEFINITIONS){
-      const timer=activityTimers.get(definition.id);const value=featureValue(definition.featureSource);let line=companions.find((item)=>item.id===definition.id);
-      const threshold=line?definition.off:definition.on;const demanded=definition.priority<=visualState.layerDemand;const active=allowEntering&&demanded&&value>=threshold;
-      if(active){timer.activeMs+=delta*1000;timer.inactiveMs=0;if(!line&&timer.activeMs>=720&&companions.length<MAX_COMPANIONS){line=createCompanion(definition,now);companions.push(line);}if(line){line.lastActiveAt=now;if(line.phase==='leaving'&&timer.activeMs>=560)line.phase='entering';}}
-      else{timer.inactiveMs+=delta*1000;timer.activeMs=0;if(line&&line.phase!=='leaving'&&timer.inactiveMs>=1450)line.phase='leaving';}
+      const timer=activityTimers.get(definition.id);const value=featureValue(definition.featureSource);const baseline=latestFeatures.long?.[definition.featureSource]||0;const novelty=Math.max(0,value-baseline);let line=companions.find((item)=>item.id===definition.id);
+      const enteringSignal=value>=definition.on&&novelty>=definition.rise;const active=allowEntering&&(line?value>=definition.off:enteringSignal);
+      if(active){timer.activeMs+=delta*1000;timer.inactiveMs=0;if(!line&&timer.activeMs>=900&&companions.length<MAX_COMPANIONS){line=createCompanion(definition,now);companions.push(line);}if(line){line.lastActiveAt=now;if(line.phase==='leaving'&&timer.activeMs>=700)line.phase='entering';}}
+      else{timer.inactiveMs+=delta*1000;timer.activeMs=0;if(line&&line.phase!=='leaving'&&timer.inactiveMs>=2200)line.phase='leaving';}
       if(!line)continue;const target=line.phase==='leaving'?0:clamp(.24+value*.92);line.intensity=smooth(line.intensity,target,delta,line.phase==='leaving'?1.35:.62);if(line.phase==='entering'&&line.intensity>.78)line.phase='active';
     }
     companions=companions.filter((line)=>!(line.phase==='leaving'&&line.intensity<.018));
@@ -174,19 +167,20 @@ export function createArtwork(container) {
 
   function addTrajectoryPoints(delta,now,generating){
     if(!generating)return;worldX+=visualState.travelSpeed*delta;pointAccumulator+=delta;if(pointAccumulator<POINT_INTERVAL)return;const elapsed=pointAccumulator;pointAccumulator%=POINT_INTERVAL;
-    const area=plot();const quiet=latestFeatures.silenceSeconds>1.2;const verticalLimit=(area.bottom-area.top)*.43;const amplitude=quiet?Math.min(visualState.amplitude,11):Math.min(visualState.amplitude,verticalLimit);const mainTravelPace=58+visualState.detailRate*36+latestFeatures.onsetDensity*95;mainPhase+=elapsed*clamp(mainTravelPace/Math.max(30,amplitude),.48,4.2);const mainY=area.center+Math.sin(mainPhase)*amplitude+Math.sin(mainPhase*2.73+.8)*visualState.tension*amplitude*.24;mainLine.points.push({x:worldX,y:mainY});mainLine.lastActiveAt=now;
-    for(const line of companions){const value=featureValue(line.featureSource);const amplitudeTarget=Math.min((area.bottom-area.top)*.46,(14+visualState.amplitude*.55+value*58)*line.definition.amplitudeScale);const lineAmplitude=amplitudeTarget*line.intensity;const travelPace=52+visualState.detailRate*32+latestFeatures.onsetDensity*82+value*18;const crossingRate=clamp(travelPace/Math.max(24,amplitudeTarget),.42,4.35);line.oscPhase+=elapsed*crossingRate;const phaseModulation=Math.sin(line.oscPhase*.31+line.definition.phase)*visualState.tension*.4;const y=area.center+Math.sin(line.oscPhase+phaseModulation)*lineAmplitude;line.points.push({x:worldX,y});}
+    const area=plot();const quiet=latestFeatures.silenceSeconds>1.2;const verticalLimit=(area.bottom-area.top)*.43;const amplitude=quiet?Math.min(visualState.amplitude,11):Math.min(visualState.amplitude,verticalLimit);const mainTravelPace=58+visualState.detailRate*36+latestFeatures.onsetDensity*95;mainPhase+=elapsed*clamp(mainTravelPace/Math.max(30,amplitude),.48,4.2);const organicMain=Math.sin(mainPhase)+Math.sin(mainPhase*.43+.8)*.28+Math.sin(mainPhase*.17+2.2)*.13;const mainY=area.center+organicMain*amplitude/(1+.28+.13)+Math.sin(mainPhase*2.37)*visualState.tension*amplitude*.13;mainLine.points.push({x:worldX,y:mainY});mainLine.lastActiveAt=now;
+    for(const line of companions){const value=featureValue(line.featureSource);const amplitudeTarget=Math.min((area.bottom-area.top)*.39,(12+visualState.amplitude*.47+value*48)*line.definition.amplitudeScale);const lineAmplitude=amplitudeTarget*line.intensity;const travelPace=48+visualState.detailRate*27+latestFeatures.onsetDensity*68+value*15;const crossingRate=clamp(travelPace/Math.max(24,amplitudeTarget),.38,3.6);line.oscPhase+=elapsed*crossingRate;const wave=Math.sin(line.oscPhase)+Math.sin(line.oscPhase*.39+line.definition.phase)*.31+Math.sin(line.oscPhase*.16+line.definition.phase*1.7)*.14;const y=area.center+wave*lineAmplitude/(1+.31+.14);line.points.push({x:worldX,y});}
     const cutoff=viewportStart()-90;const trim=(line)=>{while(line.points.length&&line.points[0].x<cutoff)line.points.shift();if(line.points.length>MAX_POINTS_PER_LINE)line.points.splice(0,line.points.length-MAX_POINTS_PER_LINE);};trim(mainLine);companions.forEach(trim);
   }
 
-  function drawPath(line,color,lineWidth,alpha,blendMode='source-over'){
+  function drawPath(line,color,lineWidth,alpha,blendMode='source-over',offset=0){
     if(line.points.length<2||alpha<=0)return;const area=plot();const start=viewportStart();context.save();context.globalCompositeOperation=blendMode;context.lineCap='round';context.lineJoin='round';context.beginPath();let began=false;
-    for(let index=0;index<line.points.length;index+=1){const point=line.points[index];const x=area.left+point.x-start;if(x<area.left-4||x>area.right+4)continue;if(!began){context.moveTo(x,point.y);began=true;}else if(index<line.points.length-1){const next=line.points[index+1];const nextX=area.left+next.x-start;context.quadraticCurveTo(x,point.y,(x+nextX)/2,(point.y+next.y)/2);}else context.lineTo(x,point.y);}
+    for(let index=0;index<line.points.length;index+=1){const point=line.points[index];const x=area.left+point.x-start;if(x<area.left-4||x>area.right+4)continue;if(!began){context.moveTo(x,point.y+offset);began=true;}else if(index<line.points.length-1){const next=line.points[index+1];const nextX=area.left+next.x-start;context.quadraticCurveTo(x,point.y+offset,(x+nextX)/2,(point.y+next.y+offset)/2);}else context.lineTo(x,point.y+offset);}
     if(began){const ageFade=context.createLinearGradient(area.left,0,area.right,0);ageFade.addColorStop(0,'rgba(60, 105, 154, .08)');ageFade.addColorStop(.24,color);ageFade.addColorStop(1,color);context.strokeStyle=ageFade;context.lineWidth=lineWidth;context.globalAlpha=alpha;context.shadowColor=color;context.shadowBlur=8*alpha;context.stroke();}context.restore();
   }
+  function drawRibbon(line,color,width,alpha){for(const [offset,factor] of [[-3,.34],[0,1],[3,.3]])drawPath(line,color,offset===0?width:Math.max(.55,width*.42),alpha*factor,'lighter',offset);}
 
   function sceneText(){if(mode==='rest')return'尾迹正在消散';if(latestFeatures.silenceSeconds>2.5)return'持续静音 · 视觉休止';if((latestFeatures.medium.energy-latestFeatures.long.energy)>.09)return'力度正在展开';if(latestFeatures.medium.richness>.58)return'声音层次丰富';if(latestFeatures.onsetDensity>.52)return'变化细密';return'平缓生长';}
-  function drawFrame(now,endFade){context.fillStyle='#06101f';context.fillRect(0,0,width,height);drawGrid();const fade=1-endFade;const light=Math.round(60+visualState.brightness*18);drawPath(mainLine,`hsl(${188+visualState.brightness*42} 92% ${72+visualState.brightness*10}%)`,1.5+latestFeatures.medium.energy*2.2,.9*fade,'lighter');for(const line of companions){const hue=line.definition.hue+visualState.brightness*18;drawPath(line,`hsl(${hue} 84% ${light}%)`,1.25+line.intensity*2,line.intensity*.9*fade);}sceneLabel.textContent=sceneText();}
+  function drawFrame(now,endFade){context.fillStyle='#06101f';context.fillRect(0,0,width,height);drawGrid();const fade=1-endFade;const light=Math.round(60+visualState.brightness*18);drawRibbon(mainLine,`hsl(${188+visualState.brightness*42} 92% ${72+visualState.brightness*10}%)`,1.5+latestFeatures.medium.energy*2.2,.9*fade);for(const line of companions){const hue=line.definition.hue+visualState.brightness*18;drawRibbon(line,`hsl(${hue} 84% ${light}%)`,1.15+line.intensity*1.7,line.intensity*.86*fade);}sceneLabel.textContent=sceneText();}
   function updateFeatures(now){if(now-lastAnalysisAt<ANALYSIS_INTERVAL_MS)return;lastAnalysisAt=now;latestFeatures=mode==='demo'?demoFeatures(demoElapsedMs):featureAnalyzer.sample(now);visualState=mapVisualState(latestFeatures);}
   function isGenerating(){return mode==='demo'||mode==='capture'||(mode==='file'&&!audio.paused&&!audio.ended);}
   function frame(now){if(!running||destroyed)return;const delta=Math.min(.05,Math.max(.001,(now-lastFrame)/1000||.016));lastFrame=now;if(mode==='demo')demoElapsedMs+=delta*1000;updateFeatures(now);const generating=isGenerating();updateCompanions(delta,now,generating);addTrajectoryPoints(delta,now,generating);const endFade=mode==='rest'?clamp((now-inputEndedAt)/6200):0;drawFrame(now,endFade);if(mode==='rest'&&endFade>=1){running=false;rafId=0;mainLine.points.length=0;companions=[];sceneLabel.textContent='轨迹已经归于安静';return;}rafId=requestAnimationFrame(frame);}
