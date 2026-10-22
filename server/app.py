@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .security import content_fingerprint, credential_identity, stable_item_id, validate_model_id
 
@@ -75,6 +75,59 @@ class ProviderRequest(BaseModel):
 class ExploreRequest(ProviderRequest):
     profile: Profile
     usedItemIds: list[str] = Field(default_factory=list, max_length=2000)
+
+
+class LifeGenerateRequest(ProviderRequest):
+    birthYear: int = Field(default=1988, ge=1900, le=2050)
+    worldId: str = Field(default="harbor-renewal", min_length=1, max_length=80)
+    worldLabel: str = Field(default="潮港 · 复苏年代", min_length=1, max_length=120)
+    direction: str = Field(default="", max_length=300)
+
+
+class LifeCharacter(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=80)
+    role: str = Field(default="companion", max_length=40)
+    birthTime: float = Field(ge=0, le=220)
+    endTime: float = Field(ge=0, le=240)
+    initialState: dict[str, float] = Field(default_factory=dict)
+
+
+class LifeEvent(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    characterId: str = Field(min_length=1, max_length=80)
+    time: float = Field(ge=0, le=240)
+    type: str = Field(min_length=1, max_length=50)
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=900)
+    stateChanges: dict[str, float] = Field(default_factory=dict)
+
+
+class LifeRelationSegment(BaseModel):
+    fromTime: float = Field(ge=0, le=240)
+    toTime: float = Field(ge=0, le=240)
+    status: str = Field(default="close", pattern="^(close|distant)$")
+
+
+class LifeRelationship(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    relationType: str = Field(pattern="^(parent-child|partner|friend|caregiver|sibling|relative|other)$")
+    fromId: str = Field(min_length=1, max_length=80)
+    toId: str = Field(min_length=1, max_length=80)
+    segments: list[LifeRelationSegment] = Field(min_length=1, max_length=8)
+    endReason: str = Field(default="continues", max_length=80)
+
+
+class GeneratedLifeStory(BaseModel):
+    schemaVersion: str = Field(pattern="^1\\.0$")
+    kind: str = Field(pattern="^life-story$")
+    timelineType: str = Field(pattern="^age$")
+    primaryCharacterId: str
+    tailDuration: float = Field(default=3, ge=0, le=10)
+    metadata: dict[str, Any]
+    characters: list[LifeCharacter] = Field(min_length=3, max_length=8)
+    events: list[LifeEvent] = Field(min_length=12, max_length=48)
+    relationships: list[LifeRelationship] = Field(min_length=2, max_length=16)
 
 
 def utc_now() -> datetime:
@@ -402,6 +455,97 @@ async def deepseek_json(api_key: str, model_id: str, messages: list[dict[str, st
         raise HTTPException(502, str(exc)) from exc
 
 
+def validate_generated_life_story(value: dict[str, Any]) -> GeneratedLifeStory:
+    """Validate model output before it can reach the browser or Canvas."""
+    story = GeneratedLifeStory.model_validate(value)
+    errors: list[str] = []
+    characters = {character.id: character for character in story.characters}
+    if len(characters) != len(story.characters):
+        errors.append("人物 ID 必须唯一")
+    if story.primaryCharacterId not in characters:
+        errors.append("primaryCharacterId 必须引用现有人物")
+    event_ids: set[str] = set()
+    deaths: dict[str, float] = {}
+    births: dict[str, list[float]] = {character_id: [] for character_id in characters}
+    state_keys = {"health", "resources", "mood", "education", "stability"}
+    for event in story.events:
+        if event.id in event_ids:
+            errors.append(f"事件 ID 重复：{event.id}")
+        event_ids.add(event.id)
+        character = characters.get(event.characterId)
+        if not character:
+            errors.append(f"事件 {event.id} 引用了不存在的人物")
+            continue
+        if event.time < character.birthTime or event.time > character.endTime:
+            errors.append(f"事件 {event.id} 超出 {character.name} 的生命时间线")
+        if event.type == "birth":
+            births[event.characterId].append(event.time)
+        if event.type == "death":
+            if event.characterId in deaths:
+                errors.append(f"{character.name} 只能有一个死亡事件")
+            deaths[event.characterId] = event.time
+        for key, number in event.stateChanges.items():
+            if key not in state_keys or not -1 <= number <= 1:
+                errors.append(f"事件 {event.id} 的状态变化无效")
+    for character_id, character in characters.items():
+        birth_times = births[character_id]
+        if len(birth_times) != 1 or abs(birth_times[0] - character.birthTime) > .001:
+            errors.append(f"{character.name} 必须有且仅有一个与 birthTime 一致的出生事件")
+        death_time = deaths.get(character_id)
+        if death_time is not None:
+            if abs(death_time - character.endTime) > .001:
+                errors.append(f"{character.name} 的死亡事件必须与 endTime 一致")
+            if any(event.characterId == character_id and event.time > death_time for event in story.events):
+                errors.append(f"{character.name} 的死亡事件之后不能再有事件")
+        for key, number in character.initialState.items():
+            if key not in state_keys or not 0 <= number <= 1:
+                errors.append(f"{character.name} 的初始状态无效")
+    relation_ids: set[str] = set()
+    for relation in story.relationships:
+        if relation.id in relation_ids:
+            errors.append(f"关系 ID 重复：{relation.id}")
+        relation_ids.add(relation.id)
+        if relation.fromId == relation.toId or relation.fromId not in characters or relation.toId not in characters:
+            errors.append(f"关系 {relation.id} 的人物引用无效")
+            continue
+        earliest = max(characters[relation.fromId].birthTime, characters[relation.toId].birthTime)
+        latest = min(characters[relation.fromId].endTime, characters[relation.toId].endTime)
+        if relation.relationType == "parent-child":
+            generation_gap = characters[relation.toId].birthTime - characters[relation.fromId].birthTime
+            if generation_gap < 14 or generation_gap > 65:
+                errors.append(f"亲子关系 {relation.id} 必须按 fromId=父母、toId=子女记录，出生时间需相差 14–65 年")
+        previous_end = -1.0
+        for segment in relation.segments:
+            if segment.fromTime > segment.toTime or segment.fromTime < earliest or segment.toTime > latest:
+                errors.append(f"关系 {relation.id} 的时间段超出双方生命时间线")
+            if segment.fromTime < previous_end:
+                errors.append(f"关系 {relation.id} 的时间段必须按顺序且不能重叠")
+            previous_end = segment.toTime
+    if not any(relation.relationType in {"parent-child", "caregiver"} for relation in story.relationships):
+        errors.append("故事至少需要一段父母或照护关系")
+    if errors:
+        raise ValueError("；".join(errors[:10]))
+    return story
+
+
+def repair_generated_life_story(value: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Apply only deterministic repairs that cannot change story meaning."""
+    repaired = json.loads(json.dumps(value))
+    repairs: list[str] = []
+    for collection_name in ("events", "relationships"):
+        seen: dict[str, int] = {}
+        for item in repaired.get(collection_name, []) if isinstance(repaired, dict) else []:
+            original = str(item.get("id", "")).strip()
+            if not original:
+                continue
+            count = seen.get(original, 0)
+            seen[original] = count + 1
+            if count:
+                item["id"] = f"{original}-{count + 1}"
+                repairs.append(f"{collection_name} 中的重复 ID {original} 已安全改为 {item['id']}")
+    return repaired, repairs
+
+
 def search_queries(profile: Profile) -> list[tuple[str, str]]:
     core = ", ".join(profile.coreDomains[:8]) or profile.name
     adjacent = ", ".join(profile.adjacentDomains[:8]) or f"{profile.name} adjacent fields"
@@ -538,6 +682,62 @@ async def test_connection(request: ProviderRequest) -> dict[str, Any]:
         "tavily": {"configured": tavily_configured, "tested": False},
         "note": "连接测试不会调用搜索接口或消耗搜索 credits；Tavily 将在首次探索时验证。",
     }
+
+
+@app.post("/api/life/generate")
+async def generate_life(request: LifeGenerateRequest) -> dict[str, Any]:
+    try:
+        model_id = validate_model_id(request.modelId)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    specification = {
+        "birthYear": request.birthYear,
+        "world": {"id": request.worldId, "label": request.worldLabel},
+        "direction": request.direction or "自然、克制、有因果连续性的一生",
+        "contract": {
+            "schemaVersion": "1.0", "kind": "life-story", "timelineType": "age",
+            "primaryCharacterId": "characters 中一个人物的 id", "tailDuration": 3,
+            "metadata": {"title": "故事标题", "fictional": True, "basis": "ai-fictional-story"},
+            "characters": [{"id": "唯一 id", "name": "姓名", "role": "primary/parent/partner/child/friend", "birthTime": 20, "endTime": 90, "initialState": {"health": .7, "resources": .5, "mood": .6, "education": .1, "stability": .6}}],
+            "events": [{"id": "唯一 id", "characterId": "人物 id", "time": 0, "type": "birth/education/career/relationship/family/migration/health/death", "title": "标题", "description": "原因、选择或影响", "stateChanges": {"mood": .05}}],
+            "relationships": [{"id": "唯一 id", "relationType": "parent-child/partner/friend/caregiver/sibling/relative/other", "fromId": "人物 id", "toId": "人物 id", "segments": [{"fromTime": 0, "toTime": 30, "status": "close/distant"}], "endReason": "continues/separation/death"}],
+        },
+        "rules": [
+            "只返回一个 JSON 对象，不使用 Markdown。",
+            "生成 4–7 个可独立展示的人物和 20–35 个有叙事作用的事件；所有时间使用同一世界时间轴，时间 0 可以是父母出生，主角不必在时间 0 出生。",
+            "每个人必须有且仅有一个 birth 事件，time 必须等于 birthTime；若人物死亡，death time 必须等于 endTime，死亡后不得有其事件。",
+            "先建立人物与关系，再写事件。提到女儿、儿子、伴侣或父母且需要独立展示时，必须创建人物对象和关系。",
+            "至少包含父母或照护者；伴侣、婚育和长寿均不强制。parent-child 必须 fromId=父母、toId=子女，出生时间相差 14–65 年；关系从子女出生后开始。",
+            "让重要事件影响后续选择，并让配角拥有不依附主角的经历；不要用散步或休息一天填充时间线。",
+            "relation segments 必须位于双方出生与 endTime 的交集内，并按时间排序、不重叠。",
+            "stateChanges 只能使用 health/resources/mood/education/stability，初始值为 0–1，变化值为 -1–1。",
+            "内容为虚构故事，不冒充真实史实，不输出 Canvas 坐标或 annualStates。",
+        ],
+    }
+    messages = [
+        {"role": "system", "content": "你是结构化人生故事编辑。严格遵守数据契约，返回合法 JSON；先保证人物、关系、出生、死亡和事件时间一致。"},
+        {"role": "user", "content": json.dumps(specification, ensure_ascii=False)},
+    ]
+    last_problem = "模型输出未通过校验"
+    applied_repairs: list[str] = []
+    for attempt in range(2):
+        generated = await deepseek_json(request.credentials.deepseekApiKey, model_id, messages, max_tokens=9000)
+        generated, repairs = repair_generated_life_story(generated)
+        applied_repairs.extend(repairs)
+        try:
+            story = validate_generated_life_story(generated)
+            return {"story": story.model_dump(), "provider": "DeepSeek", "modelId": model_id, "validated": True, "repairs": applied_repairs}
+        except (ValidationError, ValueError) as exc:
+            if isinstance(exc, ValidationError):
+                last_problem = "；".join(f"{'.'.join(map(str, error['loc']))}：{error['msg']}" for error in exc.errors()[:10])
+            else:
+                last_problem = str(exc)
+            if attempt == 0:
+                messages.extend([
+                    {"role": "assistant", "content": json.dumps(generated, ensure_ascii=False)},
+                    {"role": "user", "content": f"上一个 JSON 未通过程序校验：{last_problem}。请完整重写并只返回修复后的 JSON。"},
+                ])
+    raise HTTPException(502, f"DeepSeek 人生故事连续两次未通过校验：{last_problem[:500]}")
 
 
 @app.post("/api/radar/explore")

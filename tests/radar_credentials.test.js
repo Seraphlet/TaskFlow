@@ -73,6 +73,11 @@ assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), false);
   assert.strictEqual(request.url, '/api/radar/explore');
   assert.strictEqual(requestTimeout, 240000);
 
+  await new RemoteRadarProvider({ tavilyApiKey: '', deepseekApiKey: 'sk-header-or-body-only', modelId: 'deepseek-flash' }).generateLife({ birthYear:1988, worldId:'harbor-renewal', worldLabel:'潮港' });
+  assert.strictEqual(request.url, '/api/life/generate');
+  assert.strictEqual(request.url.includes('sk-header-or-body-only'), false);
+  assert.strictEqual(requestTimeout, 240000);
+
   credentials.clear();
   const cleared = credentials.getCredentials();
   assert.strictEqual(cleared.tavilyApiKey, '');

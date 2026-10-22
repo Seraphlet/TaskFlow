@@ -1,4 +1,4 @@
-# Life Geometry JSON 契约（V1）
+# Life Geometry JSON 契约（V3）
 
 Life Geometry 把数据分成四层：`person-template` 描述人物条件与候选经历，世界包描述年份范围内的环境规则，面向 AI 的 `life-story` 描述固定故事，内部 `life-result` 记录可直接绘制的人生。Canvas 只消费结果，不决定事件。
 
@@ -29,7 +29,7 @@ AI 应输出 `kind: "life-story"`，不需要生成 `annualStates` 或 Canvas �
 - `characters`: `id`、`name` 必填；`birthTime`、`endTime`、`initialState` 可选。
 - `events`: `id`、`characterId`、`time`、`type`、`title` 必填；`description`、`stateChanges` 可选。
 - `stateChanges`: 只接受健康、资源、情绪、教育、稳定性五个 -1–1 的增量。
-- `relationships`: 使用统一时间轴上的 `startTime`、`endTime`，分离不等于死亡。
+- `relationships`: 推荐填写 `relationType`（`parent-child`、`partner`、`friend`、`caregiver`、`sibling`、`relative`、`other`）以及 `segments`。每段包含统一时间轴上的 `fromTime`、`toTime` 和 `close` / `distant` 状态；旧版 `startTime`、`endTime` 仍兼容。
 
 所有事件时间都使用同一条世界时间轴。不同出生时间人物的 `time: 30` 表示同一个世界时刻，而不是所有人都是 30 岁。转换器会自动排序事件、补齐人物时间区间、应用状态变化并生成绘图状态采样。
 
@@ -52,6 +52,8 @@ AI 应输出 `kind: "life-story"`，不需要生成 `annualStates` 或 Canvas �
 - `examples/life-multi-person-story.json`：推荐给 AI 的简化多人物故事。
 - `examples/life-invalid-example.json`：故意包含重复 ID、越界状态、无效引用和死亡后事件，用于验证字段级错误提示。
 
-## AI 离线创作
+## AI 生成与离线创作
 
-作品的“导入人生与创作工具”面板内置可复制提示词及完整 `life-story` 示例。AI 只用于网页外预生成 JSON，运行时不调用任何模型。生成后会依次经过语法解析、字段校验、引用校验、时间和生死一致性校验、状态规范化，再进入统一渲染器。真实人物或事实资料必须明确来源与事实边界，虚构内容须标注为虚构。
+“AI 生成人生”复用 Settings 中 Radar 的 DeepSeek Key 和模型 ID，通过同源 `/api/life/generate` 调用固定可信的 DeepSeek 地址；前端不新增或持久化第二份凭证。后端要求模型先构建人物与关系，再生成事件，并在返回浏览器前执行结构、唯一 ID、引用、出生/死亡、亲子代际、事件边界和关系区间校验；仅对不改变含义的重复事件/关系 ID 做确定性修复，其余问题要求模型完整重写一次。两次仍失败时保留当前播放结果。
+
+作品的“导入人生与创作工具”仍内置可复制提示词和完整 `life-story` 示例，可在后端不可用时从其他工具生成后人工导入。离线规则模式不需要任何 API。三个入口都要经过前端校验、排序、状态规范化与轨迹预计算后才进入统一渲染器。真实人物或事实资料必须明确来源与事实边界，虚构内容须标注为虚构。

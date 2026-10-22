@@ -24,9 +24,9 @@ let homeClockTimer = null;
 let activeArtwork = null;
 let artworkLoadToken = 0;
 const PLAYGROUND_MODULES = {
-  music: './playground/music-geometry.js?v=20261022-watch-v2',
+  music: './playground/music-geometry.js?v=20261022-art-v3',
   keyboard: './playground/keyboard-art.js?v=20261022-watch-v2',
-  life: './playground/life-geometry.js?v=20261022-life-v21',
+  life: './playground/life-geometry.js?v=20261022-life-v3',
 };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();

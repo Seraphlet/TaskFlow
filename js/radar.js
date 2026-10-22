@@ -182,6 +182,9 @@
     async getNextBatch(profile, usedItemIds = []) {
       return this.post('/api/radar/explore', { profile, usedItemIds }, 240000);
     }
+    async generateLife({ birthYear, worldId, worldLabel, direction = '' }) {
+      return this.post('/api/life/generate', { birthYear, worldId, worldLabel, direction }, 240000);
+    }
   }
 
   function normalizeLegacyItems(items = []) {

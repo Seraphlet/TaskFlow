@@ -5,10 +5,10 @@ const vm = require('vm');
 const source = fs.readFileSync('js/playground/music-geometry.js', 'utf8');
 const analyzerStart = source.indexOf('function createFeatureAnalyzer');
 assert.ok(analyzerStart > 0, 'feature analyzer boundary must exist');
-const mappingSource = `${source.slice(0, analyzerStart).replace('export function mapVisualState', 'function mapVisualState')}\nmodule.exports = mapVisualState;`;
+const mappingSource = `${source.slice(0, analyzerStart).replaceAll('export function', 'function')}\nmodule.exports = { mapVisualState, estimateBeatPeriod };`;
 const sandbox = { module: { exports: null }, Math };
 vm.runInNewContext(mappingSource, sandbox);
-const mapVisualState = sandbox.module.exports;
+const { mapVisualState, estimateBeatPeriod } = sandbox.module.exports;
 
 function profile({ energy, onset, richness, low, mid, high, flux, centroid = 0.45, longEnergy = energy }) {
   const medium = { energy, richness, low, mid, high, flux, centroid };
@@ -35,4 +35,10 @@ assert.ok(strongSlow.amplitude > quietPiano.amplitude, 'strong music must expand
 assert.ok(release.layerDemand < layeredBuild.layerDemand, 'a sustained release must reduce companion demand');
 assert.ok(release.travelSpeed < strongSlow.travelSpeed, 'long-term energy must give the journey visual inertia');
 
-console.log('Music Geometry V2 feature-to-visual mapping tests passed');
+const stableBeat = estimateBeatPeriod([0,500,1002,1498,2001,2500,3002,3499,4000,4501]);
+assert.ok(Math.abs(stableBeat.periodMs - 500) < 12, 'stable onsets must yield their real beat period');
+assert.ok(stableBeat.confidence > .65, 'stable periodic onsets must have useful confidence');
+const weakBeat = estimateBeatPeriod([0,311,845,1602,1910,2811]);
+assert.ok(weakBeat.confidence < .5, 'irregular onsets must not be advertised as a reliable BPM');
+
+console.log('Music Geometry V3 feature and beat mapping tests passed');

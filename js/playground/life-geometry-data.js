@@ -99,12 +99,12 @@ export const AI_STORY_PROMPT = `你是一名结构化故事编辑。请把用户
 严格要求：
 1. 只输出一个合法 JSON 对象，不使用 Markdown 代码围栏，不附解释。
 2. schemaVersion 必须是 "1.0"，kind 必须是 "life-story"。
-3. timelineType 使用 "age"；只有原作没有年龄且不能合理确定时才用 "story-time"。所有 event.time 都是同一条世界时间轴上的非负数字，不是每个人各自从 0 开始的年龄。
+3. timelineType 使用 "age"；只有原作没有年龄且不能合理确定时才用 "story-time"。所有 event.time 都是同一条世界时间轴上的非负数字，不是每个人各自从 0 开始的年龄。时间 0 可以是上一代出生，主角不必在时间 0 出生。
 4. primaryCharacterId 必须引用 characters 中存在的唯一 id。所有 characterId、fromId、toId 都必须引用已有且不重复的人物 id。
-5. characters 必填 id、name；role 可为 primary 或 companion；birthTime、endTime 为可选非负数字；initialState 可选，health/resources/mood/education/stability 取 0–1。
+5. characters 必填 id、name；role 可为 primary、parent、partner、child、friend 或 companion；birthTime、endTime 为可选非负数字；initialState 可选，health/resources/mood/education/stability 取 0–1。提到需要独立展示的父母、伴侣、子女或孙辈时，必须创建人物对象和出生事件。
 6. events 至少包含 id、characterId、time、type、title、description。stateChanges 可选，仅能包含 health/resources/mood/education/stability 的 -1–1 增量。事件事实写在结构化字段中，不把规则藏进 description。
 7. 同一人物死亡事件 type="death" 后不得再有该人物事件；其他仍存人物可以继续。关系结束不等于死亡。
-8. relationships 可选；每项含 fromId、toId、startTime、endTime，startTime 不得晚于 endTime；status 可用 close/distant，endReason 可用 separation/death。
+8. relationships 可选；推荐包含 relationType（parent-child/partner/friend/caregiver/sibling/relative/other）及 segments，每段含 fromTime、toTime、status(close/distant)。亲子关系必须 fromId=父母、toId=子女，出生时间相差 14–65 年。旧版 startTime/endTime 仍兼容。
 9. 普通生活事件应多于极端事件；事件应有因果连续性，严肃内容克制表达。真实人物必须在 metadata 中以 basis 说明资料依据；无法确认的内容标为虚构，不冒充史实。
 10. 必须保留人物之间独立发生的事件，不要让伴随人物只在与主角相遇时出现。
 
