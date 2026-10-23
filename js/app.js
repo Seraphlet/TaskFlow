@@ -24,9 +24,9 @@ let homeClockTimer = null;
 let activeArtwork = null;
 let artworkLoadToken = 0;
 const PLAYGROUND_MODULES = {
-  music: './playground/music-geometry.js?v=20261022-art-v3',
+  music: './playground/music-geometry.js?v=20261022-art-v4',
   keyboard: './playground/keyboard-art.js?v=20261022-watch-v2',
-  life: './playground/life-geometry.js?v=20261022-life-v3',
+  life: './playground/life-geometry.js?v=20261022-life-v4',
 };
 const uid = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
@@ -296,7 +296,7 @@ function playgroundPage() {
       </article>
       <article class="playground-card playground-card-life">
         <div class="playground-card-art life-preview" aria-hidden="true"><i></i><i></i><i></i><span>∞</span></div>
-        <div class="playground-card-copy"><span class="home-card-kicker">LIFE × TIME × WORLD</span><h4>Life Geometry · 万千人生</h4><p>让同一人物走入不同年份与世界，观看候选经历如何被保留、推迟、改变或终止。</p><ul><li>可复现人生推演</li><li>人物关系伴线</li><li>JSON 导入与固定故事</li></ul><button class="btn primary" type="button" data-playground-open="life">进入作品 →</button></div>
+        <div class="playground-card-copy"><span class="home-card-kicker">LIFE × TIME × WORLD</span><h4>Life Geometry · 万千人生</h4><p>以共同世界时间观看一群人相遇、同行、分离、重逢，并继续各自的人生。</p><ul><li>独立人物生命线</li><li>关系驱动的靠近与淡出</li><li>AI、JSON 与离线生成</li></ul><button class="btn primary" type="button" data-playground-open="life">进入作品 →</button></div>
       </article>
     </div>
     <p class="playground-footnote">作品模块不会在首页或此列表页预加载；离开作品后动画、音频和输入监听会停止。</p>

@@ -106,8 +106,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .surface-toolbar { align-items: center; padding: 12px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.62); }
 .home-shell { position: relative; isolation: isolate; min-height: 100vh; color: #f8fafc; }
 .home-shell::before { content: ""; position: fixed; inset: 0; z-index: 0; background-color: #07111f; background-image: url("./images/home-background.webp"); background-repeat: no-repeat; background-position: 50% center; background-size: cover; }
-.home-shell > .sidebar, .home-shell > .main { position: relative; z-index: 1; }
-.home-shell > .sidebar { background: rgba(5,14,27,.72); border-right-color: rgba(255,255,255,.11); }
+.home-shell > .main { position: relative; z-index: 1; }
+.home-shell > .sidebar { position: sticky; top: 0; align-self: start; z-index: 1; background: rgba(5,14,27,.72); border-right-color: rgba(255,255,255,.11); }
 .home-shell .topbar { color: #f8fafc; background: rgba(6,14,27,.58); border-bottom-color: rgba(255,255,255,.12); backdrop-filter: blur(10px); }
 .home-shell .topbar p { color: #aebbd0; }
 .home-shell .topbar-state { color: #dbe5f4; border-color: rgba(255,255,255,.17); background: rgba(15,23,42,.5); }
@@ -420,7 +420,6 @@ tbody tr:last-child td { border-bottom: 0; }
 .artwork-legend i { width: 7px; height: 7px; border-radius: 50%; background: #56d9e7; }
 .artwork-legend .legend-low { background: #a78bfa; }
 .artwork-legend .legend-change { background: #ff9a86; }
-.artwork-legend .legend-beat { background: #ffd166; box-shadow: 0 0 8px rgba(255,209,102,.72); }
 .artwork-readout { right: 14px; top: 14px; display: flex; gap: 11px; padding: 8px 10px; color: #8397ad; font: 10px ui-monospace,SFMono-Regular,Consolas,monospace; }
 .artwork-readout b { color: #e7f5ff; font-variant-numeric: tabular-nums; }
 .artwork-readout [data-perf] { padding-left: 10px; border-left: 1px solid rgba(255,255,255,.12); font-variant-numeric: tabular-nums; }

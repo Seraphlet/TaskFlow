@@ -6,28 +6,6 @@ const POINT_INTERVAL = 1 / 30;
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const smooth = (current, target, delta, seconds) => current + (target - current) * (1 - Math.exp(-delta / seconds));
 
-export function estimateBeatPeriod(onsetTimes, previousPeriod = 0) {
-  const recent = onsetTimes.slice(-24);
-  if (recent.length < 5) return { periodMs: previousPeriod || 0, confidence: 0 };
-  const intervals = [];
-  for (let index = 1; index < recent.length; index += 1) {
-    let interval = recent[index] - recent[index - 1];
-    while (interval > 1000) interval /= 2;
-    while (interval < 280) interval *= 2;
-    if (interval >= 280 && interval <= 1000) intervals.push(interval);
-  }
-  if (intervals.length < 4) return { periodMs: previousPeriod || 0, confidence: 0 };
-  const ordered = [...intervals].sort((a, b) => a - b);
-  const median = ordered[Math.floor(ordered.length / 2)];
-  const inliers = intervals.filter((interval) => Math.abs(interval - median) <= median * .16);
-  if (inliers.length < 3) return { periodMs: previousPeriod || median, confidence: 0 };
-  const periodMs = inliers.reduce((sum, interval) => sum + interval, 0) / inliers.length;
-  const deviation = Math.sqrt(inliers.reduce((sum, interval) => sum + (interval - periodMs) ** 2, 0) / inliers.length) / periodMs;
-  const confidence = clamp((inliers.length / intervals.length) * Math.min(1, intervals.length / 9) * (1 - deviation * 2.4));
-  const stablePeriod = previousPeriod && Math.abs(periodMs - previousPeriod) / previousPeriod < .12 ? previousPeriod * .72 + periodMs * .28 : periodMs;
-  return { periodMs: stablePeriod, confidence };
-}
-
 export function mapVisualState(features) {
   const medium = features.medium || features;
   const long = features.long || medium;
@@ -51,7 +29,7 @@ function createFeatureAnalyzer() {
   const keys = ['energy','low','mid','high','flux','centroid','richness'];
   const raw = Object.fromEntries(keys.map((key) => [key,0]));
   const short = { ...raw }; const medium = { ...raw }; const long = { ...raw };
-  const result = { raw, short, medium, long, onsetDensity:0, silenceSeconds:0, beatPeriodMs:0, beatPhase:0, beatConfidence:0 };
+  const result = { raw, short, medium, long, onsetDensity:0, silenceSeconds:0 };
   let analyser = null;
   let sampleRate = 48000;
   let timeData = null;
@@ -60,10 +38,6 @@ function createFeatureAnalyzer() {
   let lastSampleAt = 0;
   let lastOnsetAt = -Infinity;
   const onsetTimes = [];
-  const beatOnsetTimes = [];
-  let lastBeatEstimateAt = 0;
-  let pendingBeatPeriod = 0;
-  let pendingBeatCount = 0;
 
   function attach(nextAnalyser, nextSampleRate) {
     analyser = nextAnalyser;
@@ -71,14 +45,13 @@ function createFeatureAnalyzer() {
     timeData = new Float32Array(analyser.fftSize);
     frequencyData = new Uint8Array(analyser.frequencyBinCount);
     previousSpectrum = new Uint8Array(analyser.frequencyBinCount);
-    lastSampleAt = 0; lastOnsetAt = -Infinity; onsetTimes.length = 0; beatOnsetTimes.length = 0;
-    lastBeatEstimateAt=0;pendingBeatPeriod=0;pendingBeatCount=0;
+    lastSampleAt = 0; lastOnsetAt = -Infinity; onsetTimes.length = 0;
     keys.forEach((key) => { raw[key]=0;short[key]=0;medium[key]=0;long[key]=0; });
-    result.onsetDensity=0;result.silenceSeconds=0;result.beatPeriodMs=0;result.beatPhase=0;result.beatConfidence=0;
+    result.onsetDensity=0;result.silenceSeconds=0;
   }
 
   function detach() {
-    analyser=null;timeData=null;frequencyData=null;previousSpectrum=null;lastSampleAt=0;onsetTimes.length=0;beatOnsetTimes.length=0;lastBeatEstimateAt=0;
+    analyser=null;timeData=null;frequencyData=null;previousSpectrum=null;lastSampleAt=0;onsetTimes.length=0;
   }
 
   function bandAverage(fromHz, toHz) {
@@ -122,20 +95,9 @@ function createFeatureAnalyzer() {
     const activeBands=[raw.low,raw.mid,raw.high].filter((value)=>value>.1).length/3;
     raw.richness=clamp(entropy*.68+activeBands*.32);
     const onsetThreshold=Math.max(.055,short.flux*1.42);
-    if(raw.flux>onsetThreshold&&now-lastOnsetAt>95){onsetTimes.push(now);beatOnsetTimes.push(now);lastOnsetAt=now;}
+    if(raw.flux>onsetThreshold&&now-lastOnsetAt>95){onsetTimes.push(now);lastOnsetAt=now;}
     while(onsetTimes.length&&onsetTimes[0]<now-2200)onsetTimes.shift();
-    while(beatOnsetTimes.length&&beatOnsetTimes[0]<now-12000)beatOnsetTimes.shift();
     result.onsetDensity=smooth(result.onsetDensity,clamp(onsetTimes.length/11),delta,.35);
-    if(now-lastBeatEstimateAt>=480){
-      lastBeatEstimateAt=now;const estimate=estimateBeatPeriod(beatOnsetTimes,result.beatPeriodMs);
-      if(estimate.confidence>=.38){
-        const changed=result.beatPeriodMs&&Math.abs(estimate.periodMs-result.beatPeriodMs)/result.beatPeriodMs>=.14;
-        if(changed){const samePending=pendingBeatPeriod&&Math.abs(estimate.periodMs-pendingBeatPeriod)/pendingBeatPeriod<.1;pendingBeatCount=samePending?pendingBeatCount+1:1;pendingBeatPeriod=estimate.periodMs;if(pendingBeatCount>=3){result.beatPeriodMs=estimate.periodMs;pendingBeatCount=0;}}
-        else{result.beatPeriodMs=estimate.periodMs;pendingBeatCount=0;}
-      }
-      result.beatConfidence=smooth(result.beatConfidence,estimate.confidence,Math.max(delta,.48),estimate.confidence>=.38?.9:1.8);
-    }
-    if(result.beatPeriodMs&&beatOnsetTimes.length){const sinceOnset=Math.max(0,now-beatOnsetTimes.at(-1));result.beatPhase=(sinceOnset%result.beatPeriodMs)/result.beatPeriodMs;}
     result.silenceSeconds=raw.energy<.018?result.silenceSeconds+delta:0;
     keys.forEach((key)=>{
       short[key]=smooth(short[key],raw[key],delta,.18);
@@ -157,8 +119,7 @@ function demoFeatures(now) {
   else if(seconds>=32){const p=1-(seconds-32)/10;energy=.06+p*.3;richness=.1+p*.5;onset=.06+p*.22;low=.05+p*.26;mid=.06+p*.31;high=.03+p*.23;}
   const pulse=Math.max(0,Math.sin(seconds*(2.1+onset*5)))*onset*.18;
   const medium={energy:clamp(energy),low:clamp(low),mid:clamp(mid),high:clamp(high),flux:clamp(onset*.38+pulse),centroid:clamp(.26+high*.55),richness:clamp(richness)};
-  const beatConfidence=seconds<6?.12:seconds<32?.82:.48,beatPeriodMs=seconds>=26&&seconds<32?430:620;
-  return {raw:{...medium,energy:clamp(energy+pulse)},short:{...medium,energy:clamp(energy+pulse),flux:clamp(onset*.48+pulse)},medium,long:{...medium,energy:clamp(energy*.88),low:clamp(low*.78),mid:clamp(mid*.75),high:clamp(high*.68),richness:clamp(richness*.7)},onsetDensity:clamp(onset),silenceSeconds:0,beatPeriodMs,beatPhase:(seconds*1000%beatPeriodMs)/beatPeriodMs,beatConfidence};
+  return {raw:{...medium,energy:clamp(energy+pulse)},short:{...medium,energy:clamp(energy+pulse),flux:clamp(onset*.48+pulse)},medium,long:{...medium,energy:clamp(energy*.88),low:clamp(low*.78),mid:clamp(mid*.75),high:clamp(high*.68),richness:clamp(richness*.7)},onsetDensity:clamp(onset),silenceSeconds:0};
 }
 
 const COMPANION_DEFINITIONS = [
@@ -170,7 +131,7 @@ const COMPANION_DEFINITIONS = [
 export function createArtwork(container) {
   container.innerHTML=`<section class="artwork artwork-music">
     <div class="artwork-toolbar"><div class="artwork-status"><span class="artwork-mode" data-mode>演示信号 · 非音频分析</span><small data-file>尚未连接音频</small></div><div class="artwork-controls"><button class="btn primary" type="button" data-capture>捕获音乐标签页</button><button class="btn" type="button" data-play>暂停演示</button><label class="btn artwork-file" for="music-file">备用：本地文件<input id="music-file" type="file" accept="audio/*"></label><button class="btn" type="button" data-reset>重置轨迹</button></div></div>
-    <div class="artwork-canvas-shell"><canvas aria-label="音乐的一生连续生命轨迹"></canvas><div class="artwork-legend"><span><i class="legend-energy"></i>音乐主线</span><span><i class="legend-low"></i>声音层次</span><span><i class="legend-change"></i>变化细节</span><span><i class="legend-beat"></i>节拍线</span></div><div class="artwork-readout"><span data-scene>平缓生长</span><span data-perf>帧统计采样中</span></div></div>
+    <div class="artwork-canvas-shell"><canvas aria-label="音乐的一生连续生命轨迹"></canvas><div class="artwork-legend"><span><i class="legend-energy"></i>音乐主线</span><span><i class="legend-low"></i>声音层次</span><span><i class="legend-change"></i>变化细节</span></div><div class="artwork-readout"><span data-scene>平缓生长</span><span data-perf>帧统计采样中</span></div></div>
     <p class="artwork-help" data-message>演示模式以虚拟特征展示从平静、展开到收束的连续轨迹。主丝带始终存在；相对稳定基准持续出现的新频段会形成最多三束伴随丝带。</p>
   </section>`;
 
@@ -180,9 +141,8 @@ export function createArtwork(container) {
   const audio=new Audio();audio.preload='metadata';const featureAnalyzer=createFeatureAnalyzer();
   let audioContext=null;let analyser=null;let activeSourceNode=null;let fileSourceNode=null;let captureStream=null;let captureAudioTrack=null;let captureRequestToken=0;let objectUrl='';
   let mode='demo';let running=false;let destroyed=false;let userPaused=false;let hiddenResume=false;let audioWasPlaying=false;let rafId=0;let lastFrame=0;let lastAnalysisAt=0;let pointAccumulator=0;let worldX=0;let inputEndedAt=0;let demoElapsedMs=0;let frameSampleCount=0;let frameSampleTotal=0;let renderSampleTotal=0;
-  let width=1;let height=1;let dpr=1;let latestFeatures=demoFeatures(0);let visualState=mapVisualState(latestFeatures);let mainPhase=0;let beatPhase=0;let beatRate=0;
+  let width=1;let height=1;let dpr=1;let latestFeatures=demoFeatures(0);let visualState=mapVisualState(latestFeatures);let mainPhase=0;
   const mainLine={id:'main',featureSource:'energy',phase:'active',intensity:1,points:[],createdAt:performance.now(),lastActiveAt:performance.now()};
-  const beatLine={id:'beat',featureSource:'beat-period',phase:'active',intensity:1,points:[],createdAt:performance.now(),lastActiveAt:performance.now()};
   let companions=[];const activityTimers=new Map(COMPANION_DEFINITIONS.map((definition)=>[definition.id,{activeMs:0,inactiveMs:0}]));
 
   function resize(){const bounds=canvas.getBoundingClientRect();dpr=Math.min(window.devicePixelRatio||1,2);width=Math.max(320,Math.round(bounds.width));height=Math.max(360,Math.round(bounds.height));canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);context.setTransform(dpr,0,0,dpr,0,0);drawFrame(performance.now(),0);}
@@ -190,7 +150,7 @@ export function createArtwork(container) {
   function viewportStart(){const area=plot();return Math.max(0,worldX-area.span*.5);}
   function drawGrid(){const area=plot();context.save();context.strokeStyle='rgba(133,166,199,.105)';context.lineWidth=1;context.beginPath();for(let x=area.left;x<=area.right;x+=Math.max(48,area.span/14)){context.moveTo(x,area.top);context.lineTo(x,area.bottom);}for(let y=area.top;y<=area.bottom;y+=Math.max(44,(area.bottom-area.top)/9)){context.moveTo(area.left,y);context.lineTo(area.right,y);}context.stroke();context.strokeStyle='rgba(220,232,246,.34)';context.beginPath();context.moveTo(area.left,area.center);context.lineTo(area.right,area.center);context.stroke();context.restore();}
 
-  function resetJourney(){worldX=0;pointAccumulator=0;mainPhase=0;beatPhase=0;beatRate=0;mainLine.points.length=0;mainLine.livePoint=null;beatLine.points.length=0;beatLine.livePoint=null;mainLine.createdAt=performance.now();mainLine.lastActiveAt=mainLine.createdAt;beatLine.createdAt=mainLine.createdAt;beatLine.lastActiveAt=mainLine.createdAt;companions=[];activityTimers.forEach((timer)=>{timer.activeMs=0;timer.inactiveMs=0;});inputEndedAt=0;frameSampleCount=0;frameSampleTotal=0;renderSampleTotal=0;perfLabel.textContent='帧统计采样中';context.fillStyle='#06101f';context.fillRect(0,0,width,height);drawGrid();}
+  function resetJourney(){worldX=0;pointAccumulator=0;mainPhase=0;mainLine.points.length=0;mainLine.livePoint=null;mainLine.createdAt=performance.now();mainLine.lastActiveAt=mainLine.createdAt;companions=[];activityTimers.forEach((timer)=>{timer.activeMs=0;timer.inactiveMs=0;});inputEndedAt=0;frameSampleCount=0;frameSampleTotal=0;renderSampleTotal=0;perfLabel.textContent='帧统计采样中';context.fillStyle='#06101f';context.fillRect(0,0,width,height);drawGrid();}
   function featureValue(source){if(source==='onsetDensity')return latestFeatures.onsetDensity||0;return latestFeatures.medium[source]||0;}
   function createCompanion(definition,now){return{id:definition.id,featureSource:definition.featureSource,phase:'entering',intensity:.02,points:[],livePoint:null,createdAt:now,lastActiveAt:now,oscPhase:definition.phase,definition};}
 
@@ -209,9 +169,8 @@ export function createArtwork(container) {
     if(!generating)return;worldX+=visualState.travelSpeed*delta;pointAccumulator+=delta;
     const area=plot();const quiet=latestFeatures.silenceSeconds>1.2;const verticalLimit=(area.bottom-area.top)*.43;const amplitude=quiet?Math.min(visualState.amplitude,11):Math.min(visualState.amplitude,verticalLimit);const mainTravelPace=58+visualState.detailRate*36+latestFeatures.onsetDensity*95;mainPhase+=delta*clamp(mainTravelPace/Math.max(30,amplitude),.48,4.2);const organicMain=Math.sin(mainPhase)+Math.sin(mainPhase*.43+.8)*.28+Math.sin(mainPhase*.17+2.2)*.13;const mainY=area.center+organicMain*amplitude/(1+.28+.13)+Math.sin(mainPhase*2.37)*visualState.tension*amplitude*.13;mainLine.livePoint={x:worldX,y:mainY};mainLine.lastActiveAt=now;
     for(const line of companions){const value=featureValue(line.featureSource);const amplitudeTarget=Math.min((area.bottom-area.top)*.39,(12+visualState.amplitude*.47+value*48)*line.definition.amplitudeScale);const lineAmplitude=amplitudeTarget*line.intensity;const travelPace=48+visualState.detailRate*27+latestFeatures.onsetDensity*68+value*15;const crossingRate=clamp(travelPace/Math.max(24,amplitudeTarget),.38,3.6);line.oscPhase+=delta*crossingRate;const wave=Math.sin(line.oscPhase)+Math.sin(line.oscPhase*.39+line.definition.phase)*.31+Math.sin(line.oscPhase*.16+line.definition.phase*1.7)*.14;line.livePoint={x:worldX,y:area.center+wave*lineAmplitude/(1+.31+.14)};}
-    const confidence=clamp(latestFeatures.beatConfidence||0),periodMs=latestFeatures.beatPeriodMs||0,targetRate=confidence>=.34&&periodMs?Math.PI*2/(periodMs/1000):0;beatRate=smooth(beatRate,targetRate,delta,targetRate?.75:1.4);beatPhase+=beatRate*delta;if(targetRate){const measuredPhase=(latestFeatures.beatPhase||0)*Math.PI*2,phaseError=Math.atan2(Math.sin(measuredPhase-beatPhase),Math.cos(measuredPhase-beatPhase));beatPhase+=phaseError*(1-Math.exp(-delta/.8));}const beatBase=area.bottom-(area.bottom-area.top)*.11,neutral=Math.sin(worldX*.012)*1.4,beatWave=Math.sin(beatPhase)*12+Math.max(0,Math.cos(beatPhase))**4*8;beatLine.livePoint={x:worldX,y:beatBase+(confidence>=.34?beatWave*confidence:neutral)};beatLine.lastActiveAt=now;
-    if(pointAccumulator<POINT_INTERVAL)return;pointAccumulator%=POINT_INTERVAL;mainLine.points.push({...mainLine.livePoint});beatLine.points.push({...beatLine.livePoint});companions.forEach((line)=>{if(line.livePoint)line.points.push({...line.livePoint});});
-    const cutoff=viewportStart()-72;const trim=(line)=>{const firstVisible=line.points.findIndex((point)=>point.x>=cutoff);if(firstVisible>0)line.points.splice(0,firstVisible);if(line.points.length>MAX_POINTS_PER_LINE)line.points.splice(0,line.points.length-MAX_POINTS_PER_LINE);};trim(mainLine);trim(beatLine);companions.forEach(trim);
+    if(pointAccumulator<POINT_INTERVAL)return;pointAccumulator%=POINT_INTERVAL;mainLine.points.push({...mainLine.livePoint});companions.forEach((line)=>{if(line.livePoint)line.points.push({...line.livePoint});});
+    const cutoff=viewportStart()-72;const trim=(line)=>{const firstVisible=line.points.findIndex((point)=>point.x>=cutoff);if(firstVisible>0)line.points.splice(0,firstVisible);if(line.points.length>MAX_POINTS_PER_LINE)line.points.splice(0,line.points.length-MAX_POINTS_PER_LINE);};trim(mainLine);companions.forEach(trim);
   }
 
   function drawPath(line,paint,lineWidth,alpha,blendMode='source-over',offset=0,glow=false){
@@ -223,10 +182,10 @@ export function createArtwork(container) {
   function drawRibbon(line,color,width,alpha){const area=plot(),paint=context.createLinearGradient(area.left,0,area.right,0);paint.addColorStop(0,'rgba(60,105,154,.08)');paint.addColorStop(.24,color);paint.addColorStop(1,color);for(const [offset,factor] of [[-3,.34],[0,1],[3,.3]])drawPath(line,paint,offset===0?width:Math.max(.55,width*.42),alpha*factor,'lighter',offset,offset===0);}
 
   function sceneText(){if(mode==='rest')return'尾迹正在消散';if(latestFeatures.silenceSeconds>2.5)return'持续静音 · 视觉休止';if((latestFeatures.medium.energy-latestFeatures.long.energy)>.09)return'力度正在展开';if(latestFeatures.medium.richness>.58)return'声音层次丰富';if(latestFeatures.onsetDensity>.52)return'变化细密';return'平缓生长';}
-  function drawFrame(now,endFade){context.fillStyle='#06101f';context.fillRect(0,0,width,height);drawGrid();const fade=1-endFade;const light=Math.round(60+visualState.brightness*18);drawRibbon(mainLine,`hsl(${188+visualState.brightness*42} 92% ${72+visualState.brightness*10}%)`,1.5+latestFeatures.medium.energy*2.2,.9*fade);for(const line of companions){const hue=line.definition.hue+visualState.brightness*18;drawRibbon(line,`hsl(${hue} 84% ${light}%)`,1.15+line.intensity*1.7,line.intensity*.86*fade);}drawPath(beatLine,'#ffd166',1.6,.78*fade,'lighter',0,true);sceneLabel.textContent=sceneText();}
+  function drawFrame(now,endFade){context.fillStyle='#06101f';context.fillRect(0,0,width,height);drawGrid();const fade=1-endFade;const light=Math.round(60+visualState.brightness*18);drawRibbon(mainLine,`hsl(${188+visualState.brightness*42} 92% ${72+visualState.brightness*10}%)`,1.5+latestFeatures.medium.energy*2.2,.9*fade);for(const line of companions){const hue=line.definition.hue+visualState.brightness*18;drawRibbon(line,`hsl(${hue} 84% ${light}%)`,1.15+line.intensity*1.7,line.intensity*.86*fade);}sceneLabel.textContent=sceneText();}
   function updateFeatures(now){if(now-lastAnalysisAt<ANALYSIS_INTERVAL_MS)return;lastAnalysisAt=now;latestFeatures=mode==='demo'?demoFeatures(demoElapsedMs):featureAnalyzer.sample(now);visualState=mapVisualState(latestFeatures);}
   function isGenerating(){return mode==='demo'||mode==='capture'||(mode==='file'&&!audio.paused&&!audio.ended);}
-  function frame(now){if(!running||destroyed)return;const frameDelta=Math.max(.001,(now-lastFrame)/1000||.016),delta=Math.min(.05,frameDelta);lastFrame=now;if(mode==='demo')demoElapsedMs+=delta*1000;updateFeatures(now);const generating=isGenerating();updateCompanions(delta,now,generating);addTrajectoryPoints(delta,now,generating);const endFade=mode==='rest'?clamp((now-inputEndedAt)/6200):0,renderStarted=performance.now();drawFrame(now,endFade);frameSampleCount+=1;frameSampleTotal+=frameDelta*1000;renderSampleTotal+=performance.now()-renderStarted;if(frameSampleCount>=90){perfLabel.textContent=`帧 ${Math.round(frameSampleTotal/frameSampleCount)}ms · 绘制 ${(renderSampleTotal/frameSampleCount).toFixed(1)}ms`;frameSampleCount=0;frameSampleTotal=0;renderSampleTotal=0;}if(mode==='rest'&&endFade>=1){running=false;rafId=0;mainLine.points.length=0;beatLine.points.length=0;companions=[];sceneLabel.textContent='轨迹已经归于安静';return;}rafId=requestAnimationFrame(frame);}
+  function frame(now){if(!running||destroyed)return;const frameDelta=Math.max(.001,(now-lastFrame)/1000||.016),delta=Math.min(.05,frameDelta);lastFrame=now;if(mode==='demo')demoElapsedMs+=delta*1000;updateFeatures(now);const generating=isGenerating();updateCompanions(delta,now,generating);addTrajectoryPoints(delta,now,generating);const endFade=mode==='rest'?clamp((now-inputEndedAt)/6200):0,renderStarted=performance.now();drawFrame(now,endFade);frameSampleCount+=1;frameSampleTotal+=frameDelta*1000;renderSampleTotal+=performance.now()-renderStarted;if(frameSampleCount>=90){perfLabel.textContent=`帧 ${Math.round(frameSampleTotal/frameSampleCount)}ms · 绘制 ${(renderSampleTotal/frameSampleCount).toFixed(1)}ms`;frameSampleCount=0;frameSampleTotal=0;renderSampleTotal=0;}if(mode==='rest'&&endFade>=1){running=false;rafId=0;mainLine.points.length=0;companions=[];sceneLabel.textContent='轨迹已经归于安静';return;}rafId=requestAnimationFrame(frame);}
   function startLoop(){if(destroyed||running||document.hidden)return;running=true;lastFrame=performance.now();rafId=requestAnimationFrame(frame);}
   function stopLoop(){running=false;if(rafId)cancelAnimationFrame(rafId);rafId=0;}
 
@@ -256,5 +215,5 @@ export function createArtwork(container) {
 
   function onReset(){if(mode==='demo'){demoElapsedMs=0;latestFeatures=demoFeatures(0);visualState=mapVisualState(latestFeatures);}resetJourney();}
   const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(canvas);fileInput.addEventListener('change',onFileChange);captureButton.addEventListener('click',beginCapture);playButton.addEventListener('click',togglePlay);resetButton.addEventListener('click',onReset);audio.addEventListener('ended',onEnded);document.addEventListener('visibilitychange',onVisibilityChange);resize();
-  return{start(){userPaused=false;startLoop();},pause(){pause(true);},destroy(){if(destroyed)return;destroyed=true;captureRequestToken+=1;stopLoop();audio.pause();audio.removeAttribute('src');audio.load();cleanupCaptureStream();disconnectAnalysisGraph();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});if(objectUrl)URL.revokeObjectURL(objectUrl);resizeObserver.disconnect();fileInput.removeEventListener('change',onFileChange);captureButton.removeEventListener('click',beginCapture);playButton.removeEventListener('click',togglePlay);resetButton.removeEventListener('click',onReset);audio.removeEventListener('ended',onEnded);document.removeEventListener('visibilitychange',onVisibilityChange);mainLine.points.length=0;beatLine.points.length=0;companions=[];fileSourceNode=null;audioContext=null;container.replaceChildren();}};
+  return{start(){userPaused=false;startLoop();},pause(){pause(true);},destroy(){if(destroyed)return;destroyed=true;captureRequestToken+=1;stopLoop();audio.pause();audio.removeAttribute('src');audio.load();cleanupCaptureStream();disconnectAnalysisGraph();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});if(objectUrl)URL.revokeObjectURL(objectUrl);resizeObserver.disconnect();fileInput.removeEventListener('change',onFileChange);captureButton.removeEventListener('click',beginCapture);playButton.removeEventListener('click',togglePlay);resetButton.removeEventListener('click',onReset);audio.removeEventListener('ended',onEnded);document.removeEventListener('visibilitychange',onVisibilityChange);mainLine.points.length=0;companions=[];fileSourceNode=null;audioContext=null;container.replaceChildren();}};
 }

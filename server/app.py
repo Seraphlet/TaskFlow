@@ -106,12 +106,13 @@ class LifeEvent(BaseModel):
 class LifeRelationSegment(BaseModel):
     fromTime: float = Field(ge=0, le=240)
     toTime: float = Field(ge=0, le=240)
-    status: str = Field(default="close", pattern="^(close|distant)$")
+    status: str = Field(default="close", pattern="^(meeting|close|distant|reconnecting|ended)$")
+    eventIds: list[str] = Field(default_factory=list, max_length=12)
 
 
 class LifeRelationship(BaseModel):
     id: str = Field(min_length=1, max_length=100)
-    relationType: str = Field(pattern="^(parent-child|partner|friend|caregiver|sibling|relative|other)$")
+    relationType: str = Field(pattern="^(parent-child|partner|friend|classmate|colleague|acquaintance|caregiver|sibling|relative|other)$")
     fromId: str = Field(min_length=1, max_length=80)
     toId: str = Field(min_length=1, max_length=80)
     segments: list[LifeRelationSegment] = Field(min_length=1, max_length=8)
@@ -500,6 +501,9 @@ def validate_generated_life_story(value: dict[str, Any]) -> GeneratedLifeStory:
         for key, number in character.initialState.items():
             if key not in state_keys or not 0 <= number <= 1:
                 errors.append(f"{character.name} 的初始状态无效")
+        independent_events = [event for event in story.events if event.characterId == character_id and event.type not in {"birth", "death"}]
+        if character.endTime - character.birthTime >= 8 and not independent_events:
+            errors.append(f"{character.name} 需要至少一个属于自己的独立人生事件")
     relation_ids: set[str] = set()
     for relation in story.relationships:
         if relation.id in relation_ids:
@@ -521,6 +525,9 @@ def validate_generated_life_story(value: dict[str, Any]) -> GeneratedLifeStory:
             if segment.fromTime < previous_end:
                 errors.append(f"关系 {relation.id} 的时间段必须按顺序且不能重叠")
             previous_end = segment.toTime
+            for event_id in segment.eventIds:
+                if event_id not in event_ids:
+                    errors.append(f"关系 {relation.id} 引用了不存在的事件 {event_id}")
     if not any(relation.relationType in {"parent-child", "caregiver"} for relation in story.relationships):
         errors.append("故事至少需要一段父母或照护关系")
     if errors:
@@ -543,6 +550,36 @@ def repair_generated_life_story(value: dict[str, Any]) -> tuple[dict[str, Any], 
             if count:
                 item["id"] = f"{original}-{count + 1}"
                 repairs.append(f"{collection_name} 中的重复 ID {original} 已安全改为 {item['id']}")
+    characters = repaired.get("characters", []) if isinstance(repaired, dict) else []
+    events = repaired.get("events", []) if isinstance(repaired, dict) else []
+    if isinstance(characters, list) and isinstance(events, list):
+        used_ids = {str(event.get("id", "")) for event in events if isinstance(event, dict)}
+        birth_ids = {
+            str(event.get("characterId", ""))
+            for event in events
+            if isinstance(event, dict) and event.get("type") == "birth"
+        }
+        for character in characters:
+            if not isinstance(character, dict) or character.get("id") in birth_ids or "birthTime" not in character:
+                continue
+            character_id = str(character.get("id", ""))
+            event_id = f"birth-{character_id}"
+            suffix = 2
+            while event_id in used_ids:
+                event_id = f"birth-{character_id}-{suffix}"
+                suffix += 1
+            used_ids.add(event_id)
+            events.append({
+                "id": event_id,
+                "characterId": character_id,
+                "time": character["birthTime"],
+                "type": "birth",
+                "title": f"{character.get('name', character_id)}出生",
+                "description": "这条生命线从共同世界时间中的这一刻开始。",
+                "stateChanges": {},
+            })
+            repairs.append(f"为 {character.get('name', character_id)} 补入与 birthTime 一致的出生事件")
+        events.sort(key=lambda event: (float(event.get("time", 0)), str(event.get("id", ""))))
     return repaired, repairs
 
 
@@ -700,16 +737,16 @@ async def generate_life(request: LifeGenerateRequest) -> dict[str, Any]:
             "metadata": {"title": "故事标题", "fictional": True, "basis": "ai-fictional-story"},
             "characters": [{"id": "唯一 id", "name": "姓名", "role": "primary/parent/partner/child/friend", "birthTime": 20, "endTime": 90, "initialState": {"health": .7, "resources": .5, "mood": .6, "education": .1, "stability": .6}}],
             "events": [{"id": "唯一 id", "characterId": "人物 id", "time": 0, "type": "birth/education/career/relationship/family/migration/health/death", "title": "标题", "description": "原因、选择或影响", "stateChanges": {"mood": .05}}],
-            "relationships": [{"id": "唯一 id", "relationType": "parent-child/partner/friend/caregiver/sibling/relative/other", "fromId": "人物 id", "toId": "人物 id", "segments": [{"fromTime": 0, "toTime": 30, "status": "close/distant"}], "endReason": "continues/separation/death"}],
+            "relationships": [{"id": "唯一 id", "relationType": "parent-child/partner/friend/classmate/colleague/acquaintance/caregiver/sibling/relative/other", "fromId": "人物 id", "toId": "人物 id", "segments": [{"fromTime": 0, "toTime": 30, "status": "meeting/close/distant/reconnecting/ended", "eventIds": ["关联事件 id"]}], "endReason": "continues/separation/death"}],
         },
         "rules": [
             "只返回一个 JSON 对象，不使用 Markdown。",
-            "生成 4–7 个可独立展示的人物和 20–35 个有叙事作用的事件；所有时间使用同一世界时间轴，时间 0 可以是父母出生，主角不必在时间 0 出生。",
+            "生成 4–7 个可独立展示的人物和 20–35 个有叙事作用的事件；所有时间使用同一世界时间轴，时间 0 可以是父母出生，主角不必在时间 0 出生。每个人都必须有不依附主角的独立事件。",
             "每个人必须有且仅有一个 birth 事件，time 必须等于 birthTime；若人物死亡，death time 必须等于 endTime，死亡后不得有其事件。",
             "先建立人物与关系，再写事件。提到女儿、儿子、伴侣或父母且需要独立展示时，必须创建人物对象和关系。",
             "至少包含父母或照护者；伴侣、婚育和长寿均不强制。parent-child 必须 fromId=父母、toId=子女，出生时间相差 14–65 年；关系从子女出生后开始。",
             "让重要事件影响后续选择，并让配角拥有不依附主角的经历；不要用散步或休息一天填充时间线。",
-            "relation segments 必须位于双方出生与 endTime 的交集内，并按时间排序、不重叠。",
+            "relation segments 必须位于双方出生与 endTime 的交集内，并按时间排序、不重叠；用 meeting、close、distant、reconnecting、ended 表达相遇、陪伴、疏远、重联与终止，并用 eventIds 关联造成变化的事件。",
             "stateChanges 只能使用 health/resources/mood/education/stability，初始值为 0–1，变化值为 -1–1。",
             "内容为虚构故事，不冒充真实史实，不输出 Canvas 坐标或 annualStates。",
         ],

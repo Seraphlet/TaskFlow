@@ -33,8 +33,8 @@ def valid_story():
         "metadata":{"title":"三代人的潮声","fictional":True,"basis":"ai-fictional-story"},
         "characters":characters,"events":events,
         "relationships":[
-            {"id":"r1","relationType":"parent-child","fromId":"mother","toId":"main","segments":[{"fromTime":24,"toTime":78,"status":"close"}],"endReason":"death"},
-            {"id":"r2","relationType":"parent-child","fromId":"main","toId":"daughter","segments":[{"fromTime":52,"toTime":88,"status":"close"}],"endReason":"death"},
+            {"id":"r1","relationType":"parent-child","fromId":"mother","toId":"main","segments":[{"fromTime":24,"toTime":78,"status":"close","eventIds":["p0","m3"]}],"endReason":"death"},
+            {"id":"r2","relationType":"parent-child","fromId":"main","toId":"daughter","segments":[{"fromTime":52,"toTime":88,"status":"close","eventIds":["d0","p5"]}],"endReason":"death"},
         ],
     }
 
@@ -68,15 +68,34 @@ class LifeGenerationTests(unittest.TestCase):
         self.assertIn("重复 ID", repairs[0])
         validate_generated_life_story(repaired)
 
+    def test_missing_birth_is_safely_derived_from_character_birth_time(self):
+        generated = valid_story()
+        generated["events"] = [event for event in generated["events"] if event["id"] != "m0"]
+        original_ids = {event["id"] for event in generated["events"]}
+        repaired, repairs = repair_generated_life_story(generated)
+        validate_generated_life_story(repaired)
+        self.assertTrue(original_ids.issubset({event["id"] for event in repaired["events"]}))
+        self.assertTrue(any("出生事件" in repair for repair in repairs))
+
     def test_invalid_first_answer_is_repaired_once(self):
         invalid = valid_story()
-        invalid["events"] = invalid["events"][1:]
+        invalid["relationships"][0]["segments"][0]["eventIds"] = ["missing-event"]
         model = AsyncMock(side_effect=[invalid, valid_story()])
         with patch("server.app.deepseek_json", model):
             response = self.client.post("/api/life/generate", json=self.payload())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(model.await_count, 2)
         self.assertIn("未通过程序校验", model.await_args_list[1].args[2][-1]["content"])
+
+    def test_relationship_event_reference_and_independent_life_are_required(self):
+        missing_event = valid_story()
+        missing_event["relationships"][0]["segments"][0]["eventIds"] = ["not-there"]
+        with self.assertRaisesRegex(ValueError, "不存在的事件"):
+            validate_generated_life_story(missing_event)
+        dependent_only = valid_story()
+        dependent_only["events"] = [event for event in dependent_only["events"] if event["characterId"] != "daughter" or event["type"] in {"birth", "death"}]
+        with self.assertRaisesRegex(ValueError, "独立人生事件"):
+            validate_generated_life_story(dependent_only)
 
     def test_two_invalid_answers_fail_without_echoing_key(self):
         invalid = valid_story()

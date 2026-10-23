@@ -48,9 +48,7 @@ assert.match(music, /organicMain/, 'main ribbon must use organic compound motion
 assert.match(music, /worldX-area\.span\*\.5/, 'music viewport must follow continuously once the head reaches the middle');
 assert.match(music, /livePoint=\{x:worldX/, 'music head must interpolate every animation frame rather than wait for samples');
 assert.match(music, /data-perf/, 'music artwork must expose lightweight measured frame timing');
-assert.strictEqual((music.match(/const beatLine=/g) || []).length, 1, 'music must add exactly one independent beat line');
-assert.match(music, /estimateBeatPeriod/, 'beat line must use a period estimator rather than onset density as BPM');
-assert.match(music, /beatPhase/, 'beat line must track an independently estimated phase');
+assert.doesNotMatch(music, /beatLine|estimateBeatPeriod|legend-beat/, 'the removed V3 beat line must not leave analysis or drawing code behind');
 assert.doesNotMatch(music, /area\.bottom-area-top/, 'companion coordinates must not contain the invalid height expression');
 assert.match(keyboard, /const KEYS = \['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K'\]/, 'keyboard mapping must expose A-K effects');
 assert.match(keyboard, /MAX_MARKS = 900/, 'keyboard artwork must cap visual entities');
@@ -70,12 +68,15 @@ assert.match(life, /lowerBound\(track\.times,firstVisibleTime\)/, 'life renderin
 assert.match(life, /pendingPreparation\?\.status==='ready'/, 'life transitions must wait for a complete prepared result');
 assert.match(life, /preparationToken\+=1/, 'setting changes and destroy must invalidate stale prepared lives');
 assert.match(life, /provider\.generateLife/, 'AI life generation must reuse the existing Radar provider');
-assert.match(life, /preparedNode\.centered/, 'event nodes must use the same centered relationship position as their curve');
+assert.match(life, /preparedNode\.lane/, 'event nodes must use the same precomputed relationship lane as their curve');
+assert.match(life, /MAX_VISIBLE_TRACKS=8/, 'ensemble rendering must cap simultaneous visible curves without deleting people');
 const lifeDraw = life.slice(life.indexOf('function draw(){'), life.indexOf('function effectiveDuration'));
 assert.doesNotMatch(lifeDraw, /stateOffset\(|interpolate\(/, 'life draw loop must not repeat state interpolation');
 assert.match(life, /new Audio\(\)/, 'life artwork must provide independent local background audio');
 assert.doesNotMatch(life, /AnalyserNode|createAnalyser/, 'life background music must not affect simulation or curves');
 assert.match(styles, /\.playground-shell > \.sidebar \{ position: sticky;/, 'desktop playground sidebar must remain fixed within the viewport');
+assert.match(styles, /\.home-shell > \.sidebar \{ position: sticky;/, 'desktop home sidebar must not be reset to relative positioning');
+assert.doesNotMatch(styles, /\.home-shell > \.sidebar, \.home-shell > \.main \{ position: relative;/, 'home shell must not override sidebar sticky positioning');
 assert.match(styles, /\.life-event-feed b \{ font-size: 13px; \}/, 'life event summaries must remain readable');
 assert.match(styles, /\.life-event-feed small \{[^}]*font-size: 12px;/, 'life event metadata must remain readable');
 
