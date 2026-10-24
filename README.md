@@ -46,6 +46,7 @@ js/app.js               应用外壳、首页与四个核心模块交互
 js/storage.js           IndexedDB Local Adapter 与 Remote Adapter 边界
 js/notifications.js     通知事件、纯文本格式与未配置适配器
 js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版本兼容
+js/content-library.js   内容类型兼容、组合检索、高亮与来源链接校验
 js/radar.js             Radar Item 模型、演示 Provider 与生成边界
 js/playground/           按需加载的 Music、Keyboard 与 Life Geometry 独立作品及人生引擎
 docs/                   Life Geometry JSON 契约说明
@@ -70,7 +71,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 
 - Tasks、Team、Activity、Handoffs、Local Notes、Notes 草稿与 Radar Profiles / Batches 保存在当前浏览器的 IndexedDB 中。
 - Notes 草稿按数据源与 Note ID 隔离并自动保存；刷新或关闭后会恢复上次打开的草稿。正式保存成功才清除草稿，失败仍保留。Web Locks 可用时使用单编辑锁，并始终以修订号阻止旧异步写入覆盖新内容。
-- Categories 直接聚合 Note 的 `category` 字段，不维护独立分类数据库。旧 Note 中存在 `companyName` 时会兼容显示为 `Company`。
+- Categories 直接复用 Notes 数据，不维护独立分类数据库。Note 可增量保存 `contentType`、`purpose`、`sourceUrl` 与 `pinned`；内容类型（提示词、笔记、SOP / 指南、其他）和主题分类可组合筛选，并支持多关键词、可自定义快捷标签、命中高亮、全文展开与复制。旧 Note 缺少新字段时默认作为“笔记”读取，存在 `companyName` 时继续兼容显示为 `Company`。
 - Radar 的 Profile、当前 Batch 与探索历史分开保存。每个 Profile 独立恢复自己的当前批次和历史；切换方向不会覆盖其他方向。成功、无新内容、失败、中断及达到客户端限额都会留下历史记录。
 - 内置 Provider 仍只有有限的演示 Radar Items。它不会循环三批内容，也不会把不匹配用户领域的固定内容伪装成生成结果；候选不足会在页面明确提示。
 - DeepSeek Key 是真实联网的必需凭证，Tavily Key 可选。配置 Tavily 时优先使用 Tavily；未配置、月度 credits 不足、网络故障、限流或服务端错误时使用官方 DeepSeek Search。Tavily 凭证错误仍会明确提示。每次最多生成 3 组搜索查询，候选已足够时提前停止；缓存默认 24 小时，命中缓存不会新增外部请求。推荐历史默认保存 180 天，Inbox 最长保存 30 天。
@@ -85,7 +86,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 
 Notes 默认使用 Local。Settings 中可填写自己的 Memos 地址和 Personal Access Token，先执行真实连接测试，再显式 Connect。令牌默认仅保存在当前浏览器会话；只有主动勾选“记住令牌”才会持久化。
 
-支持官方 Memos 26.10 / Latest 的 `/api` 与 0.30–0.31 的 `/api/v1`，并使用 Bearer Token。应用只读取和操作带有 TaskFlow 标记的远端 Memos，不会删除其他来源内容。
+支持官方 Memos 26.10 / Latest 的 `/api` 与 0.30–0.31 的 `/api/v1`，并使用 Bearer Token。应用只读取和操作带有 TaskFlow 标记的远端 Memos，不会删除其他来源内容。新增的内容类型、用途、来源链接与置顶状态写入同一 TaskFlow 元数据标记，旧版远端 Note 仍可读取；内容不会自动过期或清理。
 
 浏览器从 `file://` 访问远端 Memos 可能因 CORS 或 `Origin: null` 被拒绝。应用不会绕过浏览器安全策略，也不会把 Token 发送给第三方代理；遇到此情况可继续使用 Local，或将静态页面部署到 Memos 允许的受信任来源。
 

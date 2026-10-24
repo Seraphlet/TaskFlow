@@ -2,6 +2,7 @@ const { LocalStorageAdapter, STORES, ACTIVE_STORES } = window.TaskFlowStorage;
 const { NoopNotificationAdapter, NotificationEvents, formatTaskNotification } = window.TaskFlowNotifications;
 const { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore, NotesDraftStore } = window.TaskFlowNotes;
 const { DemoRadarProvider, RemoteRadarProvider, RadarCredentialStore, DEFAULT_MODEL_ID, DEFAULT_DAILY_LIMIT, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex } = window.TaskFlowRadar;
+const { CONTENT_TYPES, normalizeNote, tokenize, searchNotes, highlightHtml, contentTypeLabel, contentSummary, safeSourceUrl } = window.TaskFlowContentLibrary;
 
 const storage = new LocalStorageAdapter();
 const notifications = new NoopNotificationAdapter();
@@ -16,7 +17,10 @@ const FIELD_LABELS = { status: '任务状态', currentSummary: '当前整体进�
 const CATEGORIES = ['AI Engineering', 'Company', 'Learning', 'Project', 'Personal'];
 const RADAR_ACTIVE_KEY = 'taskflow-radar-active-profile-v1';
 const NOTES_UI_KEY = 'taskflow-notes-ui-v1';
-const state = { route: 'home', playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
+const CATEGORY_TAGS_KEY = 'taskflow-content-quick-tags-v1';
+const DEFAULT_CATEGORY_TAGS = ['总结', '翻译', '代码', '写作'];
+function loadCategoryQuickTags() { try { const value=JSON.parse(localStorage.getItem(CATEGORY_TAGS_KEY)); return Array.isArray(value) ? value.map((item)=>String(item).trim()).filter(Boolean).slice(0,20) : [...DEFAULT_CATEGORY_TAGS]; } catch { return [...DEFAULT_CATEGORY_TAGS]; } }
+const state = { route: 'home', playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', categorySearch:'', categoryType:'All', categoryExpandedId:null, categoryQuickTags:loadCategoryQuickTags(), categoryTagEditor:false, status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
 let noteDraftTimer = null;
 let noteDraftWrite = Promise.resolve();
 let appLoaded = false;
@@ -139,6 +143,10 @@ function persistNotesUi(open = state.route === 'notes') {
   try { localStorage.setItem(NOTES_UI_KEY, JSON.stringify(all)); } catch {}
 }
 
+function persistCategoryQuickTags() {
+  try { localStorage.setItem(CATEGORY_TAGS_KEY, JSON.stringify(state.categoryQuickTags)); } catch {}
+}
+
 async function restoreNoteDraft(noteId) {
   if (!noteId) { state.noteDraft=null; state.noteDraftRevision=0; state.noteDraftRestored=false; return; }
   const draft = await notesDrafts.get(state.notesMode, noteId);
@@ -193,6 +201,18 @@ function shell(content, title, subtitle) {
     </aside>
     <main class="main"><header class="topbar"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><div class="topbar-state"><span class="status-pulse"></span><span>${['notes','categories'].includes(state.route) ? esc(state.notesMode) : '本地存储'}</span></div></header>${content}</main>
   </div>${renderDrawer()}`;
+}
+
+async function copyText(value) {
+  const text = String(value || '');
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return; } catch {}
+  }
+  const area = document.createElement('textarea');
+  area.value = text; area.setAttribute('readonly',''); area.style.position='fixed'; area.style.opacity='0';
+  document.body.appendChild(area); area.select();
+  const copied = document.execCommand?.('copy'); area.remove();
+  if (!copied) throw new Error('浏览器未允许复制，请展开正文后手动选择复制');
 }
 
 function navButton(route, icon, label) {
@@ -389,9 +409,14 @@ function categoryOptions(selected = 'Personal') {
   return CATEGORIES.map((category) => `<option value="${esc(category)}" ${category === selected ? 'selected' : ''}>${esc(category)}</option>`).join('');
 }
 
+function contentTypeOptions(selected = 'note') {
+  return CONTENT_TYPES.map((type) => `<option value="${type.id}" ${type.id === selected ? 'selected' : ''}>${esc(type.label)}</option>`).join('');
+}
+
 function noteListItem(note) {
+  note = normalizeNote(note);
   const title = note.title?.trim() || note.content?.trim().split(/\n/)[0]?.slice(0, 42) || '未命名记录';
-  return `<button class="note-list-item ${state.noteId === note.id ? 'active' : ''}" data-select-note="${esc(note.id)}"><span class="note-list-title">${esc(title)}</span><span class="note-list-meta"><b>${esc(noteCategory(note))}</b>${dateText(note.updatedAt)}</span><span class="note-list-preview">${esc(note.content || '暂无正文')}</span></button>`;
+  return `<button class="note-list-item ${state.noteId === note.id ? 'active' : ''}" data-select-note="${esc(note.id)}"><span class="note-list-title">${note.pinned?'📌 ':''}${esc(title)}</span><span class="note-list-meta"><b>${esc(contentTypeLabel(note.contentType))}</b>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span><span class="note-list-preview">${esc(note.purpose || note.content || '暂无正文')}</span></button>`;
 }
 
 function draftFor(noteId) {
@@ -413,10 +438,14 @@ function noteDraftFromForm(form) {
     title:String(data.get('title') || ''),
     content:String(data.get('content') || ''),
     category:String(data.get('category') || 'Personal'),
+    contentType:String(data.get('contentType') || 'note'),
+    purpose:String(data.get('purpose') || ''),
+    sourceUrl:String(data.get('sourceUrl') || ''),
+    pinned:data.get('pinned') === 'on',
     createdAt:state.noteDraft?.createdAt || now(),
     updatedAt:now(),
     revision:Math.max(Number(state.noteDraftRevision || 0), Number(state.noteDraft?.revision || 0)) + 1,
-    dirty:!original || String(data.get('title')||'') !== String(original.title||'') || String(data.get('content')||'') !== String(original.content||'') || String(data.get('category')||'') !== String(noteCategory(original))
+    dirty:!original || String(data.get('title')||'') !== String(original.title||'') || String(data.get('content')||'') !== String(original.content||'') || String(data.get('category')||'') !== String(noteCategory(original)) || String(data.get('contentType')||'note') !== String(normalizeNote(original||{}).contentType) || String(data.get('purpose')||'') !== String(original?.purpose||'') || String(data.get('sourceUrl')||'') !== String(original?.sourceUrl||'') || (data.get('pinned')==='on') !== Boolean(original?.pinned)
   };
 }
 
@@ -463,11 +492,11 @@ async function openNoteEditor(noteId) {
   render();
 }
 
-async function startNewNote() {
+async function startNewNote(initial = {}) {
   if (state.route === 'notes') await flushNoteDraft();
   const noteId = `new:${crypto.randomUUID()}`;
   const timestamp = now();
-  const draft = {source:state.notesMode,noteId,title:'',content:'',category:state.selectedCategory==='All'?'Personal':state.selectedCategory,createdAt:timestamp,updatedAt:timestamp,revision:1,dirty:false};
+  const draft = {source:state.notesMode,noteId,title:'',content:'',category:state.selectedCategory==='All'?'Personal':state.selectedCategory,contentType:initial.contentType||'note',purpose:'',sourceUrl:'',pinned:false,createdAt:timestamp,updatedAt:timestamp,revision:1,dirty:false};
   state.noteId=noteId; state.noteDraft=draft; state.noteDraftRevision=1;
   state.noteDraftRestored=false;
   await notesDrafts.save(draft);
@@ -478,13 +507,14 @@ async function startNewNote() {
 
 function noteEditor(note) {
   const isNew = !note || String(note.id).startsWith('new:');
-  const draft = draftFor(note.id) || note || {};
+  const draft = normalizeNote(draftFor(note.id) || note || {});
   const dirty = Boolean(draft.dirty);
   return `<form class="note-workspace-editor" id="note-editor-form" data-note-id="${esc(note.id)}" data-dirty="${dirty}">
     <div class="note-editor-toolbar"><span>${isNew ? '新记录' : `更新于 ${dateText(note.updatedAt)}`}</span>${isNew ? '' : `<button type="button" class="btn small danger" data-delete-note="${esc(note.id)}">删除</button>`}</div>
     <input class="note-title-input" name="title" maxlength="160" placeholder="标题（可空）" value="${esc(draft.title || '')}">
-    <textarea class="note-body-input" name="content" placeholder="记下此刻的想法…" autofocus>${esc(draft.content || '')}</textarea>
-    <footer class="note-editor-footer"><label>Category <select class="select" name="category">${categoryOptions(draft.category || 'Personal')}</select></label><div><span class="save-status subtle" id="note-draft-status">${state.noteDraftRestored ? '已恢复本地草稿' : '没有未保存的修改'}</span><button class="btn primary" type="submit" ${dirty && !state.noteSaving ? '' : 'disabled'}>${state.noteSaving?'正在保存…':'保存 Note'}</button></div></footer>
+    <div class="note-meta-grid"><label>内容类型<select class="select" name="contentType">${contentTypeOptions(draft.contentType)}</select></label><label>主题分类<select class="select" name="category">${categoryOptions(draft.category || 'Personal')}</select></label><label class="note-purpose-field">用途说明<input class="input" name="purpose" maxlength="260" placeholder="这条内容适合解决什么问题？" value="${esc(draft.purpose)}"></label><label class="note-source-field">来源链接<input class="input" name="sourceUrl" type="url" placeholder="https://…（可选）" value="${esc(draft.sourceUrl)}"></label><label class="note-pin-field"><input name="pinned" type="checkbox" ${draft.pinned?'checked':''}> 置顶显示</label></div>
+    <textarea class="note-body-input" name="content" placeholder="${draft.contentType==='prompt'?'输入完整提示词…':'记下此刻的想法…'}" autofocus>${esc(draft.content || '')}</textarea>
+    <footer class="note-editor-footer"><span class="save-status subtle" id="note-draft-status">${state.noteDraftRestored ? '已恢复本地草稿' : '没有未保存的修改'}</span><div><button class="btn primary" type="submit" ${dirty && !state.noteSaving ? '' : 'disabled'}>${state.noteSaving?'正在保存…':'保存 Note'}</button></div></footer>
   </form>`;
 }
 
@@ -506,12 +536,32 @@ function notesPage() {
 }
 
 function categoriesPage() {
-  const groups = CATEGORIES.map((category) => ({ category, notes: state.notes.filter((note) => noteCategory(note) === category).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)) }));
-  const active = state.selectedCategory === 'All' ? null : groups.find((group) => group.category === state.selectedCategory);
-  return shell(`<section class="page"><div class="page-head"><div><span class="eyebrow">LIBRARY</span><h3>内容分类</h3><p>轻量聚合笔记，快速回到同一主题。</p></div></div>
-    <div class="category-grid">${groups.map((group) => `<button class="card category-card ${active?.category === group.category ? 'active' : ''}" data-category="${esc(group.category)}"><span>${esc(group.category)}</span><b>${group.notes.length}</b><small>条记录</small></button>`).join('')}</div>
-    <section class="category-notes"><div class="section-title"><h4>${active ? esc(active.category) : '最近记录'}</h4><button class="btn small" data-category="All">查看全部</button></div>${(active ? active.notes : [...state.notes].sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 8)).length ? `<div class="category-note-list">${(active ? active.notes : [...state.notes].sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 8)).map((note) => `<button data-open-note="${esc(note.id)}"><b>${esc(note.title || note.content?.slice(0, 52) || '未命名记录')}</b><span>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span></button>`).join('')}</div>` : `<div class="card">${empty('这个分类还没有记录','在 Notes 中创建或调整一条记录。')}</div>`}</section>
-  </section>`, '内容分类', '简单分类 · 与 Notes 共用数据');
+  const keywords = tokenize(state.categorySearch);
+  const results = searchNotes(state.notes, { query:state.categorySearch, contentType:state.categoryType, category:state.selectedCategory });
+  const expanded = results.find((note) => note.id === state.categoryExpandedId);
+  const unavailable = state.notesError ? `<div class="warning"><b>${esc(state.notesMode)} 当前不可用：</b>${esc(state.notesError)}</div>` : '';
+  const resultList = results.length ? results.map((rawNote) => {
+    const note = normalizeNote(rawNote);
+    const open = note.id === expanded?.id;
+    const title = note.title?.trim() || note.content?.trim().split(/\n/)[0]?.slice(0, 64) || '未命名记录';
+    const summary = contentSummary(note);
+    return `<article class="library-result ${open?'expanded':''}">
+      <button class="library-result-summary" data-expand-content="${esc(note.id)}" aria-expanded="${open}">
+        <span class="library-result-main"><b>${note.pinned?'<span class="pin-mark" aria-label="已置顶">●</span> ':''}${highlightHtml(title, keywords)}</b><span>${highlightHtml(summary, keywords)}</span></span>
+        <span class="library-result-meta"><em>${esc(contentTypeLabel(note.contentType))}</em><span>${esc(noteCategory(note))}</span><time>${dateText(note.updatedAt)}</time><i aria-hidden="true">${open?'−':'＋'}</i></span>
+      </button>
+      ${open ? `<div class="library-detail"><div class="library-detail-head"><div><span class="category-chip">${esc(contentTypeLabel(note.contentType))}</span><span class="category-chip quiet">${esc(noteCategory(note))}</span></div><div class="library-actions"><button class="btn small" data-copy-content="${esc(note.id)}">复制正文</button><button class="btn small primary" data-edit-content="${esc(note.id)}">编辑内容</button>${note.sourceUrl?`<a class="btn small" href="${esc(note.sourceUrl)}" target="_blank" rel="noopener noreferrer">打开来源 ↗</a>`:''}</div></div>${note.purpose?`<div class="library-purpose"><b>用途说明</b><p>${highlightHtml(note.purpose, keywords)}</p></div>`:''}<div class="library-full-text">${highlightHtml(note.content || '暂无正文', keywords)}</div></div>` : ''}
+    </article>`;
+  }).join('') : empty('没有匹配内容','尝试减少关键词，或切换内容类型与主题分类。');
+  return shell(`<section class="page library-page"><div class="page-head"><div><span class="eyebrow">CONTENT LIBRARY</span><h3>整理、检索和调用已保存内容</h3><p>提示词与笔记共用同一份数据；内容类型和主题分类可以组合筛选。</p></div><button class="btn primary" data-new-prompt ${state.notesError?'disabled':''}>＋ 新建提示词</button></div>${unavailable}
+    <section class="card library-controls" aria-label="内容检索">
+      <div class="library-search-row"><div class="search library-search"><span>⌕</span><label class="sr-only" for="category-search">搜索内容</label><input id="category-search" class="input" type="search" placeholder="输入多个关键词，空格分隔（任一命中）" value="${esc(state.categorySearch)}"></div>${state.categorySearch?'<button class="btn small" data-clear-category-search>清空</button>':''}</div>
+      <div class="library-filter-row"><b>快捷搜索</b><div class="quick-tags">${state.categoryQuickTags.map((tag)=>`<span class="quick-tag"><button data-quick-tag="${esc(tag)}">${esc(tag)}</button><button data-remove-quick-tag="${esc(tag)}" aria-label="删除快捷标签 ${esc(tag)}">×</button></span>`).join('')}${state.categoryTagEditor?'<span class="quick-tag-editor"><input class="input" id="quick-tag-input" maxlength="40" placeholder="搜索词"><button class="btn small primary" data-save-quick-tag>保存</button><button class="btn small" data-cancel-quick-tag>取消</button></span>':'<button class="quick-tag-add" data-add-quick-tag>＋ 自定义</button>'}</div></div>
+      <div class="library-filter-row"><b>内容类型</b><div class="filter-chips"><button class="filter-chip ${state.categoryType==='All'?'active':''}" data-content-type="All">全部</button>${CONTENT_TYPES.map((type)=>`<button class="filter-chip ${state.categoryType===type.id?'active':''}" data-content-type="${type.id}">${esc(type.label)}</button>`).join('')}</div></div>
+      <div class="library-filter-row"><b>主题分类</b><div class="filter-chips"><button class="filter-chip ${state.selectedCategory==='All'?'active':''}" data-category="All">全部</button>${CATEGORIES.map((category)=>`<button class="filter-chip ${state.selectedCategory===category?'active':''}" data-category="${esc(category)}">${esc(category)}</button>`).join('')}</div></div>
+    </section>
+    <section class="library-results"><div class="section-title"><div><h4>搜索结果</h4><p>${results.length} 条 · ${esc(state.notesMode)} 数据源${keywords.length?` · ${keywords.length} 个关键词`:''}</p></div></div><div class="library-result-list">${resultList}</div></section>
+  </section>`, '内容分类', `${results.length} 条匹配 · ${state.notesMode}`);
 }
 
 function radarCard(item) {
@@ -766,7 +816,7 @@ async function saveNoteForm(form) {
     if (!content && !fd.get('title').trim()) { toast('标题和正文不能同时为空','error'); return; }
     const old = state.notes.find((note) => note.id === draftNoteId);
     const timestamp = now();
-    const note = { id:old?.id||uid('note'), source, title:fd.get('title').trim(), content, category:fd.get('category'), createdAt:old?.createdAt||timestamp, updatedAt:timestamp };
+    const note = normalizeNote({ id:old?.id||uid('note'), source, title:fd.get('title').trim(), content, category:fd.get('category'), contentType:fd.get('contentType'), purpose:String(fd.get('purpose')||'').trim(), sourceUrl:safeSourceUrl(fd.get('sourceUrl'), true), pinned:fd.get('pinned')==='on', createdAt:old?.createdAt||timestamp, updatedAt:timestamp });
     const saved = old ? await currentNotesAdapter().update(note) : await currentNotesAdapter().create(note);
     await notesDrafts.delete(source,draftNoteId);
     state.noteId = saved?.id || note.id; state.noteDraft = null; state.noteDraftRevision=0; state.noteDraftRestored=false;
@@ -839,7 +889,7 @@ async function saveRadarToNotes(id) {
   const item = activeRadarBatch()?.items.find((entry) => entry.id === id);
   if (!item) return;
   const timestamp = now();
-  const note = { id:uid('note'), source:state.notesMode, title:item.title, content:`${item.explanation}${item.changeSummary ? `\n\n本次变化：${item.changeSummary}` : ''}\n\n为什么值得关注：${item.why}\n\n来源：${item.sourceName}\n${item.sourceUrl}`, category:CATEGORIES.includes(item.domain)?item.domain:'Learning', createdAt:timestamp, updatedAt:timestamp };
+  const note = normalizeNote({ id:uid('note'), source:state.notesMode, title:item.title, content:`${item.explanation}${item.changeSummary ? `\n\n本次变化：${item.changeSummary}` : ''}\n\n为什么值得关注：${item.why}\n\n来源：${item.sourceName}\n${item.sourceUrl}`, purpose:item.why || '', sourceUrl:item.sourceUrl || '', contentType:'note', pinned:false, category:CATEGORIES.includes(item.domain)?item.domain:'Learning', createdAt:timestamp, updatedAt:timestamp });
   await currentNotesAdapter().create(note);
   await loadNotes();
   toast(`已保存到 Notes · ${note.category}`);
@@ -866,8 +916,19 @@ app.addEventListener('click', async (e) => {
   const open=e.target.closest('[data-open]'); if(open){openDrawer(open.dataset.open,open.dataset.open==='edit-radar-profile'?state.radarProfileId:null); return;}
   if(e.target.closest('[data-close]') || (e.target.classList.contains('drawer-backdrop'))){closeDrawer();return;}
   const newNote=e.target.closest('[data-new-note]'); if(newNote){await startNewNote();return;}
+  const newPrompt=e.target.closest('[data-new-prompt]'); if(newPrompt){await startNewNote({contentType:'prompt'});return;}
   const selectNote=e.target.closest('[data-select-note]'); if(selectNote){await openNoteEditor(selectNote.dataset.selectNote);return;}
   const openNote=e.target.closest('[data-open-note]'); if(openNote){await openNoteEditor(openNote.dataset.openNote);return;}
+  const contentType=e.target.closest('[data-content-type]'); if(contentType){state.categoryType=contentType.dataset.contentType;state.categoryExpandedId=null;render();return;}
+  const expandContent=e.target.closest('[data-expand-content]'); if(expandContent){const id=expandContent.dataset.expandContent;state.categoryExpandedId=state.categoryExpandedId===id?null:id;render();return;}
+  const editContent=e.target.closest('[data-edit-content]'); if(editContent){await openNoteEditor(editContent.dataset.editContent);return;}
+  const copyContent=e.target.closest('[data-copy-content]'); if(copyContent){const note=state.notes.find((item)=>item.id===copyContent.dataset.copyContent);if(!note)throw new Error('未找到要复制的内容');await copyText(note.content);toast('正文已复制');return;}
+  const quickTag=e.target.closest('[data-quick-tag]'); if(quickTag){state.categorySearch=quickTag.dataset.quickTag;state.categoryExpandedId=null;render();return;}
+  const removeQuickTag=e.target.closest('[data-remove-quick-tag]'); if(removeQuickTag){state.categoryQuickTags=state.categoryQuickTags.filter((tag)=>tag!==removeQuickTag.dataset.removeQuickTag);persistCategoryQuickTags();render();return;}
+  if(e.target.closest('[data-add-quick-tag]')){state.categoryTagEditor=true;render();document.querySelector('#quick-tag-input')?.focus();return;}
+  if(e.target.closest('[data-cancel-quick-tag]')){state.categoryTagEditor=false;render();return;}
+  if(e.target.closest('[data-save-quick-tag]')){const value=String(document.querySelector('#quick-tag-input')?.value||'').trim().slice(0,40);if(!value){toast('请输入快捷搜索词','error');return;}if(!state.categoryQuickTags.includes(value))state.categoryQuickTags=[...state.categoryQuickTags,value].slice(0,20);state.categoryTagEditor=false;persistCategoryQuickTags();render();return;}
+  if(e.target.closest('[data-clear-category-search]')){state.categorySearch='';state.categoryExpandedId=null;render();return;}
   const category=e.target.closest('[data-category]'); if(category){state.selectedCategory=category.dataset.category;render();return;}
   const deleteRadar=e.target.closest('[data-delete-radar-profile]'); if(deleteRadar){await deleteRadarProfile(deleteRadar.dataset.deleteRadarProfile);return;}
   if(e.target.closest('[data-explore-new]')){await exploreNew();return;}
@@ -893,6 +954,7 @@ app.addEventListener('click', async (e) => {
 app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'||e.target.id==='note-editor-form'){e.preventDefault();try{if(e.target.id==='drawer-form')await onSubmit(e.target);else await saveNoteForm(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
 app.addEventListener('input', (e) => {
   const editor=e.target.closest('#note-editor-form'); if(editor){scheduleNoteDraft(editor);return;}
+  if(e.target.id==='category-search'){state.categorySearch=e.target.value;state.categoryExpandedId=null;render();const input=document.querySelector('#category-search');input?.focus();input?.setSelectionRange(input.value.length,input.value.length);return;}
   if(['task-search','note-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);}
   if(['tavily-key','deepseek-key'].includes(e.target.id)) {
     radarCredentials.rememberSessionDraft({

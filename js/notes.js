@@ -2,6 +2,7 @@
   const CONFIG_KEY = 'taskflow-notes-config-v1';
   const TOKEN_KEY = 'taskflow-memos-token-v1';
   const MARKER = '<!-- taskflow-note:v1 ';
+  const normalizeNote = window.TaskFlowContentLibrary?.normalizeNote || ((note) => ({ ...note, contentType:note.contentType || 'note', purpose:note.purpose || '', sourceUrl:note.sourceUrl || '', pinned:Boolean(note.pinned) }));
 
   const toBase64 = (value) => btoa(unescape(encodeURIComponent(JSON.stringify(value))));
   const fromBase64 = (value) => JSON.parse(decodeURIComponent(escape(atob(value))));
@@ -14,10 +15,10 @@
 
   class LocalNotesAdapter {
     constructor(storage) { this.storage = storage; this.mode = 'Local'; }
-    async list() { return this.storage.all('notes'); }
-    async get(id) { return this.storage.get('notes', id); }
-    async create(note) { await this.storage.put('notes', note); return note; }
-    async update(note) { await this.storage.put('notes', note); return note; }
+    async list() { return (await this.storage.all('notes')).map(normalizeNote); }
+    async get(id) { const note = await this.storage.get('notes', id); return note ? normalizeNote(note) : note; }
+    async create(note) { const value=normalizeNote(note); await this.storage.put('notes', value); return value; }
+    async update(note) { const value=normalizeNote(note); await this.storage.put('notes', value); return value; }
     async delete(id) { return this.storage.delete('notes', id); }
   }
 
@@ -118,8 +119,9 @@
     }
 
     encode(note) {
-      const metadata = toBase64({ title: note.title || '', category: note.category || (note.companyName ? 'Company' : 'Personal') });
-      return `${MARKER}${metadata} -->\n${note.content}`;
+      const normalized = normalizeNote(note);
+      const metadata = toBase64({ title:normalized.title || '', category:normalized.category || (normalized.companyName ? 'Company' : 'Personal'), contentType:normalized.contentType, purpose:normalized.purpose, sourceUrl:normalized.sourceUrl, pinned:normalized.pinned });
+      return `${MARKER}${metadata} -->\n${normalized.content}`;
     }
 
     decode(memo) {
@@ -128,7 +130,7 @@
       if (!match) return null;
       try {
         const meta = fromBase64(match[1]);
-        return { id: memo.name, remoteId: memo.name, source: 'Memos', title: meta.title || '', category: meta.category || (meta.companyName ? 'Company' : 'Personal'), content: content.slice(match[0].length), createdAt: timeValue(memo.createTime || memo.create_time), updatedAt: timeValue(memo.updateTime || memo.update_time) };
+        return normalizeNote({ id:memo.name, remoteId:memo.name, source:'Memos', title:meta.title || '', category:meta.category || (meta.companyName ? 'Company' : 'Personal'), contentType:meta.contentType, purpose:meta.purpose, sourceUrl:meta.sourceUrl, pinned:meta.pinned, content:content.slice(match[0].length), createdAt:timeValue(memo.createTime || memo.create_time), updatedAt:timeValue(memo.updateTime || memo.update_time) });
       } catch { return null; }
     }
 
