@@ -404,6 +404,17 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .setting-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .setting-card-head h4 { margin-bottom: 6px; }
 .setting-card-head p { margin: 0; }
+.classification-card { grid-column: 1 / -1; }
+.classification-section + .classification-section { margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); }
+.classification-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.classification-head h5 { margin: 0 0 4px; font-size: 15px; }
+.classification-head p { margin: 0; color: var(--muted); font-size: 12px; }
+.classification-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.classification-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fafaf7; }
+.classification-row > div:first-child { min-width: 0; }
+.classification-row b, .classification-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.classification-row small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.classification-row > div:last-child { display: flex; flex: 0 0 auto; gap: 6px; }
 .secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .secret-field .btn { min-width: 62px; }
 .playground-page { max-width: 1260px; }
@@ -542,6 +553,7 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .work-page { padding: 22px 20px 38px; }
   .settings-grid { grid-template-columns: 1fr; }
   .setting-card-head { align-items: stretch; flex-direction: column; }
+  .classification-list { grid-template-columns: 1fr; }
   .task-focus { grid-template-columns: 1fr; }
   .task-next { border-left: 0; border-top: 1px solid #f1d9cf; }
   .stat-row { grid-template-columns: repeat(2, 1fr); }
@@ -604,6 +616,8 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .category-note-list button { flex-direction: column; }
   .library-filter-row { grid-template-columns: 1fr; gap: 7px; }
   .library-filter-row > b { padding-top: 0; }
+  .classification-head, .classification-row { align-items: stretch; flex-direction: column; }
+  .classification-row > div:last-child { justify-content: flex-end; }
   .library-result-summary { grid-template-columns: 1fr; gap: 10px; }
   .library-result-meta { grid-template-columns: 1fr 1fr 18px; }
   .library-detail-head { align-items: stretch; flex-direction: column; }

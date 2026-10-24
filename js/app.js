@@ -2,7 +2,8 @@ const { LocalStorageAdapter, STORES, ACTIVE_STORES } = window.TaskFlowStorage;
 const { NoopNotificationAdapter, NotificationEvents, formatTaskNotification } = window.TaskFlowNotifications;
 const { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore, NotesDraftStore } = window.TaskFlowNotes;
 const { DemoRadarProvider, RemoteRadarProvider, RadarCredentialStore, DEFAULT_MODEL_ID, DEFAULT_DAILY_LIMIT, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex } = window.TaskFlowRadar;
-const { CONTENT_TYPES, normalizeNote, tokenize, searchNotes, highlightHtml, contentTypeLabel, contentSummary, safeSourceUrl } = window.TaskFlowContentLibrary;
+const { normalizeNote, tokenize, searchNotes, highlightHtml, contentTypeLabel, contentSummary, safeSourceUrl } = window.TaskFlowContentLibrary;
+const { ClassificationStore, DEFAULT_CONTENT_TYPES, DEFAULT_CATEGORIES } = window.TaskFlowClassifications;
 
 const storage = new LocalStorageAdapter();
 const notifications = new NoopNotificationAdapter();
@@ -10,23 +11,24 @@ const notesCredentials = new NotesCredentialStore();
 const notesDrafts = new NotesDraftStore(storage);
 const radarProvider = new DemoRadarProvider();
 const radarCredentials = new RadarCredentialStore();
+const classificationStore = new ClassificationStore();
 const app = document.querySelector('#app');
 const STATUS = ['Todo', 'Doing', 'Blocked', 'Done'];
 const STATUS_LABELS = { Todo: '待办', Doing: '进行中', Blocked: '已阻塞', Done: '已完成' };
 const FIELD_LABELS = { status: '任务状态', currentSummary: '当前整体进度', remark: '备注', next: '下一步行动', blockedReason: '阻塞说明', owner: '负责人' };
-const CATEGORIES = ['AI Engineering', 'Company', 'Learning', 'Project', 'Personal'];
 const RADAR_ACTIVE_KEY = 'taskflow-radar-active-profile-v1';
 const NOTES_UI_KEY = 'taskflow-notes-ui-v1';
 const CATEGORY_TAGS_KEY = 'taskflow-content-quick-tags-v1';
 const DEFAULT_CATEGORY_TAGS = ['总结', '翻译', '代码', '写作'];
 function loadCategoryQuickTags() { try { const value=JSON.parse(localStorage.getItem(CATEGORY_TAGS_KEY)); return Array.isArray(value) ? value.map((item)=>String(item).trim()).filter(Boolean).slice(0,20) : [...DEFAULT_CATEGORY_TAGS]; } catch { return [...DEFAULT_CATEGORY_TAGS]; } }
-const state = { route: 'home', playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', categorySearch:'', categoryType:'All', categoryExpandedId:null, categoryQuickTags:loadCategoryQuickTags(), categoryTagEditor:false, status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
+const state = { route: 'home', playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', categorySearch:'', categoryType:'All', categoryExpandedId:null, categoryQuickTags:loadCategoryQuickTags(), categoryTagEditor:false, classifications:classificationStore.read(), localClassificationNotes:[], status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
 let noteDraftTimer = null;
 let noteDraftWrite = Promise.resolve();
 let appLoaded = false;
 let homeClockTimer = null;
 let activeArtwork = null;
 let artworkLoadToken = 0;
+const composingSearches = new Set();
 const PLAYGROUND_MODULES = {
   music: './playground/music-geometry.js?v=20261022-art-v4',
   keyboard: './playground/keyboard-art.js?v=20261022-watch-v2',
@@ -163,6 +165,8 @@ async function loadNotes() {
   state.notesError = '';
   try { state.notes = await currentNotesAdapter().list(); }
   catch (error) { state.notes = []; state.notesError = error.message; }
+  state.localClassificationNotes = nextMode === 'Local' ? state.notes : await new LocalNotesAdapter(storage).list();
+  state.classifications = classificationStore.resolve([...state.notes,...state.localClassificationNotes]);
   const saved = notesUiState()[state.notesMode] || {};
   if (modeChanged || !state.noteId) state.noteId = saved.noteId || null;
   const storedDraft = state.noteId ? await notesDrafts.get(state.notesMode, state.noteId) : null;
@@ -401,22 +405,24 @@ function handoffItem(h) {
   return `<div class="event handoff-event"><div class="event-head"><div><b>${esc(h.fromName || '未分配')} → ${esc(h.toName || '未知成员')}</b><span class="event-kind">负责人交接</span></div><time>${dateText(h.createdAt)}</time></div>${h.note ? `<div class="event-content prose">${esc(h.note)}</div>`:''}<dl class="snapshot"><div><dt>当时任务状态</dt><dd>${esc(STATUS_LABELS[h.status] || h.status || '未记录')}</dd></div><div><dt>当时进度快照</dt><dd class="prose">${esc(progress)}</dd></div><div><dt>当时下一步</dt><dd class="prose">${esc(h.next || '无')}</dd></div></dl></div>`;
 }
 
-function noteCategory(note) {
-  return CATEGORIES.includes(note.category) ? note.category : note.companyName ? 'Company' : 'Personal';
+function classificationItems(kind) { return state.classifications?.[kind] || (kind === 'contentTypes' ? DEFAULT_CONTENT_TYPES : DEFAULT_CATEGORIES); }
+function classificationLabel(kind, id, fallback = '') { return classificationItems(kind).find((item) => item.id === id)?.label || fallback || id; }
+function noteCategoryId(note) { return normalizeNote(note).categoryId || 'personal'; }
+function noteCategory(note) { const normalized=normalizeNote(note); return classificationLabel('categories', normalized.categoryId, normalized.categoryLabel || normalized.category || 'Personal'); }
+function noteTypeLabel(note) { const normalized=normalizeNote(note); return classificationLabel('contentTypes', normalized.contentType, normalized.contentTypeLabel || contentTypeLabel(normalized.contentType)); }
+
+function categoryOptions(selected = 'personal', omit = '') {
+  return classificationItems('categories').filter((category) => category.id !== omit).map((category) => `<option value="${esc(category.id)}" ${category.id === selected ? 'selected' : ''}>${esc(category.label)}</option>`).join('');
 }
 
-function categoryOptions(selected = 'Personal') {
-  return CATEGORIES.map((category) => `<option value="${esc(category)}" ${category === selected ? 'selected' : ''}>${esc(category)}</option>`).join('');
-}
-
-function contentTypeOptions(selected = 'note') {
-  return CONTENT_TYPES.map((type) => `<option value="${type.id}" ${type.id === selected ? 'selected' : ''}>${esc(type.label)}</option>`).join('');
+function contentTypeOptions(selected = 'note', omit = '') {
+  return classificationItems('contentTypes').filter((type) => type.id !== omit).map((type) => `<option value="${esc(type.id)}" ${type.id === selected ? 'selected' : ''}>${esc(type.label)}</option>`).join('');
 }
 
 function noteListItem(note) {
   note = normalizeNote(note);
   const title = note.title?.trim() || note.content?.trim().split(/\n/)[0]?.slice(0, 42) || '未命名记录';
-  return `<button class="note-list-item ${state.noteId === note.id ? 'active' : ''}" data-select-note="${esc(note.id)}"><span class="note-list-title">${note.pinned?'📌 ':''}${esc(title)}</span><span class="note-list-meta"><b>${esc(contentTypeLabel(note.contentType))}</b>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span><span class="note-list-preview">${esc(note.purpose || note.content || '暂无正文')}</span></button>`;
+  return `<button class="note-list-item ${state.noteId === note.id ? 'active' : ''}" data-select-note="${esc(note.id)}"><span class="note-list-title">${note.pinned?'📌 ':''}${esc(title)}</span><span class="note-list-meta"><b>${esc(noteTypeLabel(note))}</b>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span><span class="note-list-preview">${esc(note.purpose || note.content || '暂无正文')}</span></button>`;
 }
 
 function draftFor(noteId) {
@@ -437,15 +443,19 @@ function noteDraftFromForm(form) {
     noteId,
     title:String(data.get('title') || ''),
     content:String(data.get('content') || ''),
-    category:String(data.get('category') || 'Personal'),
+    categoryId:String(data.get('category') || 'personal'),
+    category:classificationLabel('categories', String(data.get('category') || 'personal'), 'Personal'),
+    categoryLabel:classificationLabel('categories', String(data.get('category') || 'personal'), 'Personal'),
     contentType:String(data.get('contentType') || 'note'),
+    contentTypeId:String(data.get('contentType') || 'note'),
+    contentTypeLabel:classificationLabel('contentTypes', String(data.get('contentType') || 'note'), '笔记'),
     purpose:String(data.get('purpose') || ''),
     sourceUrl:String(data.get('sourceUrl') || ''),
     pinned:data.get('pinned') === 'on',
     createdAt:state.noteDraft?.createdAt || now(),
     updatedAt:now(),
     revision:Math.max(Number(state.noteDraftRevision || 0), Number(state.noteDraft?.revision || 0)) + 1,
-    dirty:!original || String(data.get('title')||'') !== String(original.title||'') || String(data.get('content')||'') !== String(original.content||'') || String(data.get('category')||'') !== String(noteCategory(original)) || String(data.get('contentType')||'note') !== String(normalizeNote(original||{}).contentType) || String(data.get('purpose')||'') !== String(original?.purpose||'') || String(data.get('sourceUrl')||'') !== String(original?.sourceUrl||'') || (data.get('pinned')==='on') !== Boolean(original?.pinned)
+    dirty:!original || String(data.get('title')||'') !== String(original.title||'') || String(data.get('content')||'') !== String(original.content||'') || String(data.get('category')||'') !== String(noteCategoryId(original)) || String(data.get('contentType')||'note') !== String(normalizeNote(original||{}).contentType) || String(data.get('purpose')||'') !== String(original?.purpose||'') || String(data.get('sourceUrl')||'') !== String(original?.sourceUrl||'') || (data.get('pinned')==='on') !== Boolean(original?.pinned)
   };
 }
 
@@ -496,7 +506,8 @@ async function startNewNote(initial = {}) {
   if (state.route === 'notes') await flushNoteDraft();
   const noteId = `new:${crypto.randomUUID()}`;
   const timestamp = now();
-  const draft = {source:state.notesMode,noteId,title:'',content:'',category:state.selectedCategory==='All'?'Personal':state.selectedCategory,contentType:initial.contentType||'note',purpose:'',sourceUrl:'',pinned:false,createdAt:timestamp,updatedAt:timestamp,revision:1,dirty:false};
+  const categoryId=state.selectedCategory==='All'?'personal':state.selectedCategory;
+  const draft = {source:state.notesMode,noteId,title:'',content:'',categoryId,category:classificationLabel('categories',categoryId,'Personal'),categoryLabel:classificationLabel('categories',categoryId,'Personal'),contentType:initial.contentType||'note',contentTypeId:initial.contentType||'note',contentTypeLabel:classificationLabel('contentTypes',initial.contentType||'note','笔记'),purpose:'',sourceUrl:'',pinned:false,createdAt:timestamp,updatedAt:timestamp,revision:1,dirty:false};
   state.noteId=noteId; state.noteDraft=draft; state.noteDraftRevision=1;
   state.noteDraftRestored=false;
   await notesDrafts.save(draft);
@@ -514,14 +525,14 @@ function noteEditor(note) {
     <input class="note-title-input" name="title" maxlength="160" placeholder="标题（可空）" value="${esc(draft.title || '')}">
     <textarea class="note-body-input" name="content" placeholder="${draft.contentType==='prompt'?'输入完整提示词…':'记下此刻的想法…'}" autofocus>${esc(draft.content || '')}</textarea>
     <input type="hidden" name="purpose" value="${esc(draft.purpose)}"><input type="hidden" name="sourceUrl" value="${esc(draft.sourceUrl)}"><input type="hidden" name="pinned" value="${draft.pinned?'on':''}">
-    <footer class="note-editor-footer"><div class="note-footer-properties"><label><span>类型</span><select class="select" name="contentType">${contentTypeOptions(draft.contentType)}</select></label><label><span>主题</span><select class="select" name="category">${categoryOptions(draft.category || 'Personal')}</select></label></div><span class="save-status subtle" id="note-draft-status">${state.noteDraftRestored ? '已恢复本地草稿' : '没有未保存的修改'}</span><div class="note-save-actions"><button class="btn primary" type="submit" ${dirty && !state.noteSaving ? '' : 'disabled'}>${state.noteSaving?'正在保存…':'保存 Note'}</button></div></footer>
+    <footer class="note-editor-footer"><div class="note-footer-properties"><label><span>类型</span><select class="select" name="contentType">${contentTypeOptions(draft.contentType)}</select></label><label><span>主题</span><select class="select" name="category">${categoryOptions(draft.categoryId || 'personal')}</select></label></div><span class="save-status subtle" id="note-draft-status">${state.noteDraftRestored ? '已恢复本地草稿' : '没有未保存的修改'}</span><div class="note-save-actions"><button class="btn primary" type="submit" ${dirty && !state.noteSaving ? '' : 'disabled'}>${state.noteSaving?'正在保存…':'保存 Note'}</button></div></footer>
   </form>`;
 }
 
 function notesPage() {
   const q = state.search.toLowerCase();
   const notes = [...state.notes]
-    .filter((n) => state.selectedCategory === 'All' || noteCategory(n) === state.selectedCategory)
+    .filter((n) => state.selectedCategory === 'All' || noteCategoryId(n) === state.selectedCategory)
     .filter((n) => !q || `${n.title || ''} ${n.content || ''} ${noteCategory(n)}`.toLowerCase().includes(q))
     .sort((a,b) => b.updatedAt.localeCompare(a.updatedAt));
   // IndexedDB draft records have their own storage key in `id`; the editor
@@ -548,17 +559,17 @@ function categoriesPage() {
     return `<article class="library-result ${open?'expanded':''}">
       <button class="library-result-summary" data-expand-content="${esc(note.id)}" aria-expanded="${open}">
         <span class="library-result-main"><b>${note.pinned?'<span class="pin-mark" aria-label="已置顶">●</span> ':''}${highlightHtml(title, keywords)}</b><span>${highlightHtml(summary, keywords)}</span></span>
-        <span class="library-result-meta"><em>${esc(contentTypeLabel(note.contentType))}</em><span>${esc(noteCategory(note))}</span><time>${dateText(note.updatedAt)}</time><i aria-hidden="true">${open?'−':'＋'}</i></span>
+        <span class="library-result-meta"><em>${esc(noteTypeLabel(note))}</em><span>${esc(noteCategory(note))}</span><time>${dateText(note.updatedAt)}</time><i aria-hidden="true">${open?'−':'＋'}</i></span>
       </button>
-      ${open ? `<div class="library-detail"><div class="library-detail-head"><div><span class="category-chip">${esc(contentTypeLabel(note.contentType))}</span><span class="category-chip quiet">${esc(noteCategory(note))}</span></div><div class="library-actions"><button class="btn small" data-copy-content="${esc(note.id)}">复制正文</button><button class="btn small primary" data-edit-content="${esc(note.id)}">编辑内容</button>${note.sourceUrl?`<a class="btn small" href="${esc(note.sourceUrl)}" target="_blank" rel="noopener noreferrer">打开来源 ↗</a>`:''}</div></div>${note.purpose?`<div class="library-purpose"><b>用途说明</b><p>${highlightHtml(note.purpose, keywords)}</p></div>`:''}<div class="library-full-text">${highlightHtml(note.content || '暂无正文', keywords)}</div></div>` : ''}
+      ${open ? `<div class="library-detail"><div class="library-detail-head"><div><span class="category-chip">${esc(noteTypeLabel(note))}</span><span class="category-chip quiet">${esc(noteCategory(note))}</span></div><div class="library-actions"><button class="btn small" data-copy-content="${esc(note.id)}">复制正文</button><button class="btn small primary" data-edit-content="${esc(note.id)}">编辑内容</button>${note.sourceUrl?`<a class="btn small" href="${esc(note.sourceUrl)}" target="_blank" rel="noopener noreferrer">打开来源 ↗</a>`:''}</div></div>${note.purpose?`<div class="library-purpose"><b>用途说明</b><p>${highlightHtml(note.purpose, keywords)}</p></div>`:''}<div class="library-full-text">${highlightHtml(note.content || '暂无正文', keywords)}</div></div>` : ''}
     </article>`;
   }).join('') : empty('没有匹配内容','尝试减少关键词，或切换内容类型与主题分类。');
   return shell(`<section class="page work-page library-page"><div class="page-head"><div><span class="eyebrow">CONTENT LIBRARY</span><h3>整理、检索和调用已保存内容</h3><p>提示词与笔记共用同一份数据；内容类型和主题分类可以组合筛选。</p></div><button class="btn primary" data-new-prompt ${state.notesError?'disabled':''}>＋ 新建提示词</button></div>${unavailable}
     <section class="card library-controls" aria-label="内容检索">
       <div class="library-search-row"><div class="search library-search"><span>⌕</span><label class="sr-only" for="category-search">搜索内容</label><input id="category-search" class="input" type="search" placeholder="输入多个关键词，空格分隔（任一命中）" value="${esc(state.categorySearch)}"></div>${state.categorySearch?'<button class="btn small" data-clear-category-search>清空</button>':''}</div>
       <div class="library-filter-row"><b>快捷搜索</b><div class="quick-tags">${state.categoryQuickTags.map((tag)=>`<span class="quick-tag"><button data-quick-tag="${esc(tag)}">${esc(tag)}</button><button data-remove-quick-tag="${esc(tag)}" aria-label="删除快捷标签 ${esc(tag)}">×</button></span>`).join('')}${state.categoryTagEditor?'<span class="quick-tag-editor"><input class="input" id="quick-tag-input" maxlength="40" placeholder="搜索词"><button class="btn small primary" data-save-quick-tag>保存</button><button class="btn small" data-cancel-quick-tag>取消</button></span>':'<button class="quick-tag-add" data-add-quick-tag>＋ 自定义</button>'}</div></div>
-      <div class="library-filter-row"><b>内容类型</b><div class="filter-chips"><button class="filter-chip ${state.categoryType==='All'?'active':''}" data-content-type="All">全部</button>${CONTENT_TYPES.map((type)=>`<button class="filter-chip ${state.categoryType===type.id?'active':''}" data-content-type="${type.id}">${esc(type.label)}</button>`).join('')}</div></div>
-      <div class="library-filter-row"><b>主题分类</b><div class="filter-chips"><button class="filter-chip ${state.selectedCategory==='All'?'active':''}" data-category="All">全部</button>${CATEGORIES.map((category)=>`<button class="filter-chip ${state.selectedCategory===category?'active':''}" data-category="${esc(category)}">${esc(category)}</button>`).join('')}</div></div>
+      <div class="library-filter-row"><b>内容类型</b><div class="filter-chips"><button class="filter-chip ${state.categoryType==='All'?'active':''}" data-content-type="All">全部</button>${classificationItems('contentTypes').map((type)=>`<button class="filter-chip ${state.categoryType===type.id?'active':''}" data-content-type="${esc(type.id)}">${esc(type.label)}</button>`).join('')}</div></div>
+      <div class="library-filter-row"><b>主题分类</b><div class="filter-chips"><button class="filter-chip ${state.selectedCategory==='All'?'active':''}" data-category="All">全部</button>${classificationItems('categories').map((category)=>`<button class="filter-chip ${state.selectedCategory===category.id?'active':''}" data-category="${esc(category.id)}">${esc(category.label)}</button>`).join('')}</div></div>
     </section>
     <section class="library-results"><div class="section-title"><div><h4>搜索结果</h4><p>${results.length} 条 · ${esc(state.notesMode)} 数据源${keywords.length?` · ${keywords.length} 个关键词`:''}</p></div></div><div class="library-result-list">${resultList}</div></section>
   </section>`, '内容分类', `${results.length} 条匹配 · ${state.notesMode}`);
@@ -609,6 +620,19 @@ function teamSettings() {
   </article>`;
 }
 
+function classificationReferenceCount(kind, id) {
+  const sources=state.notesMode==='Local'?[state.notes]:[state.notes,state.localClassificationNotes];
+  return sources.flat().filter((note) => kind === 'contentTypes' ? normalizeNote(note).contentType === id : noteCategoryId(note) === id).length;
+}
+
+function classificationSettings() {
+  const section = (kind, title) => `<section class="classification-section"><div class="classification-head"><div><h5>${title}</h5><p>稳定 ID 与显示名称分离，重命名不会断开已有笔记关联。</p></div><button class="btn small" type="button" data-classification-add="${kind}">＋ 新增</button></div><div class="classification-list">${classificationItems(kind).map((item) => {
+    const count=classificationReferenceCount(kind,item.id);
+    return `<div class="classification-row"><div><b>${esc(item.label)}</b><small>${esc(item.id)} · 可访问数据源 ${count} 条引用</small></div><div><button class="btn small" type="button" data-classification-edit="${kind}:${esc(item.id)}">重命名</button><button class="btn small danger" type="button" data-classification-delete="${kind}:${esc(item.id)}">删除</button></div></div>`;
+  }).join('')}</div></section>`;
+  return `<article class="card setting-card classification-card"><div class="setting-card-head"><div><h4>内容分类</h4><p class="subtle">统一管理随手笔记和内容分类页面使用的选项。</p></div><span class="setting-value ${state.notesMode==='Memos'?'remote':'ready'}">${esc(state.notesMode)}</span></div>${section('contentTypes','内容类型')}${section('categories','主题分类')}<div class="warning">分类配置保存在当前浏览器。尚未被任何 Memos 笔记引用的新分类不会跨设备同步；被引用后，其稳定 ID 和名称会随笔记末尾元数据保存。删除有引用的分类时必须先迁移笔记。</div></article>`;
+}
+
 function settingsPage() {
   const config = notesCredentials.getConfig();
   const radarConfig = radarCredentials.getConfig();
@@ -626,6 +650,7 @@ function settingsPage() {
         <div id="memos-test-status" class="field-hint">${state.notesError ? esc(state.notesError) : config.mode === 'Memos' ? `已连接 ${esc(config.serverUrl || '')}；仅操作 TaskFlow 标记的 Memos。` : '未配置时 Local 完整可用。连接测试成功后才可启用 Memos。'}</div>
         <div class="warning">从 file:// 连接远程 Memos 可能被 CORS / Origin: null 策略拒绝。不会要求关闭浏览器安全功能，也不会使用第三方代理。</div>
       </article>
+      ${classificationSettings()}
       <article class="card setting-card notes-storage-card"><div class="setting-card-head"><div><h4>Radar 联网服务</h4><p class="subtle">DeepSeek 必需；Tavily 可选且优先使用，未配置或服务异常时使用官方 DeepSeek Search。</p></div><span class="setting-value ${radarConfigured ? 'ready' : 'muted'}">${radarConfigured ? 'Configured' : 'Not Configured'}</span></div>
         <div class="field"><label>Tavily API Key（可选）</label><div class="secret-field"><input class="input" id="tavily-key" type="password" autocomplete="off" value="${esc(radarKeys.tavilyApiKey)}" placeholder="tvly-…"><button class="btn small" type="button" data-toggle-secret="tavily-key" aria-label="显示 Tavily API Key">显示</button></div><div class="field-hint">配置后优先使用 Tavily；连接测试不会调用搜索接口或消耗 credits，首次探索时才验证。</div></div>
         <div class="field"><label>DeepSeek API Key</label><div class="secret-field"><input class="input" id="deepseek-key" type="password" autocomplete="off" value="${esc(radarKeys.deepseekApiKey)}" placeholder="sk-…"><button class="btn small" type="button" data-toggle-secret="deepseek-key" aria-label="显示 DeepSeek API Key">显示</button></div></div>
@@ -665,6 +690,8 @@ function renderDrawer() {
   if (d.type === 'handoff') { const t=state.data.tasks.find((x)=>x.id===state.taskId); const available=state.data.team.some((m)=>!isCurrentOwner(t,m)); title='交接任务'; submit='确认交接'; body=`<div class="handoff-flow"><div class="active"><b>1</b><span>当前负责人</span></div><i>↓</i><div><b>2</b><span>接手人</span></div><i>↓</i><div><b>3</b><span>确认交接</span></div></div><div class="field"><label>当前负责人</label><input class="input" value="${esc(t.ownerName||'未分配')}" disabled></div><div class="field"><label>接手人 <span>*</span></label><select class="select" name="toId" id="handoff-to" required ${available?'':'disabled'}>${handoffMemberOptions(t)}</select>${available?'':'<div class="field-hint error-text">Team 中没有其他可接手的成员，请先到 Settings 添加成员。</div>'}</div><div class="field"><label>交接说明</label><textarea class="textarea" name="note" placeholder="交接背景、注意事项或待处理内容"></textarea></div><div class="handoff-confirm" id="handoff-confirm">请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。</div>`; }
   if (d.type === 'new-radar-profile' || d.type === 'edit-radar-profile') { const profile=d.type==='edit-radar-profile'?(state.radarProfiles.find((item)=>item.id===d.id)||activeRadarProfile()):null; const editing=Boolean(profile); title=editing?'编辑探索方向':'新建探索方向'; submit=editing?'保存配置':'创建方向'; body=`<div class="field"><label>方向名称 <span>*</span></label><input class="input" name="name" required maxlength="60" value="${esc(profile?.name||'')}" ${profile?.isDefault?'readonly':''}></div><div class="field"><label>核心领域</label><textarea class="textarea" name="coreDomains" placeholder="每行填写一个领域">${esc((profile?.coreDomains||[]).join('\n'))}</textarea><div class="field-hint">演示提供方目前支持：AI Engineering、Personal Productivity、Knowledge Management。</div></div><div class="field"><label>相邻领域</label><textarea class="textarea" name="adjacentDomains" placeholder="每行填写一个领域">${esc((profile?.adjacentDomains||[]).join('\n'))}</textarea><div class="field-hint">演示提供方目前支持：Learning Science、Behavioral Science、Product Design。</div></div><div class="warning">修改配置不会清除当前批次；下一次 Explore New 才会按新配置查找演示候选。Unknown Window 始终保持开放。</div>`; }
   if (d.type === 'new-member' || d.type === 'edit-member') { const m=state.data.team.find((x)=>x.id===d.id); title=d.type==='new-member'?'添加成员':'编辑成员'; submit='保存成员'; body=`<div class="field"><label>Name <span>*</span></label><input class="input" name="name" required value="${esc(m?.name||'')}"></div><div class="field"><label>Email <span>*</span></label><input class="input" name="email" type="email" required value="${esc(m?.email||'')}"></div>`; }
+  if (d.type === 'new-classification' || d.type === 'edit-classification') { const item=classificationItems(d.kind).find((entry)=>entry.id===d.id); const label=d.kind==='contentTypes'?'内容类型':'主题分类'; title=d.type==='new-classification'?`新增${label}`:`重命名${label}`; submit=d.type==='new-classification'?'新增分类':'保存名称'; body=`<div class="field"><label>显示名称 <span>*</span></label><input class="input" name="label" maxlength="60" required autofocus value="${esc(item?.label||'')}"></div><div class="warning">分类关联使用不可变的稳定 ID。重命名只改变显示名称，不会中断已有笔记关联。</div>`; }
+  if (d.type === 'delete-classification') { const item=classificationItems(d.kind).find((entry)=>entry.id===d.id); const count=classificationReferenceCount(d.kind,d.id); const label=d.kind==='contentTypes'?'内容类型':'主题分类'; title=`删除${label}`; submit=count?'迁移并删除':'确认删除'; const options=d.kind==='contentTypes'?contentTypeOptions('',d.id):categoryOptions('',d.id); body=`<div class="warning"><b>将删除“${esc(item?.label||'')}”</b><br>${count?`当前可访问的数据源有 ${count} 条笔记引用，必须先迁移到其他分类。`:'当前可访问的数据源没有引用；删除后本地配置将不再显示此分类。'}</div>${count?`<div class="field"><label>迁移到 <span>*</span></label><select class="select" name="replacementId" required><option value="">请选择目标分类</option>${options}</select></div>`:''}<p class="field-hint">若不可访问的另一数据源仍存在相同分类，重新连接时会从笔记元数据安全恢复，不会删除笔记正文。</p>`; }
   return `<div class="drawer-backdrop"><form class="drawer" id="drawer-form"><header class="drawer-head"><h3>${title}</h3><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></header><div class="drawer-body">${body}</div><footer class="drawer-foot"><button type="button" class="btn" data-close>取消</button><button class="btn primary" type="submit">${submit}</button></footer></form></div>`;
 }
 
@@ -687,6 +714,29 @@ function openDrawer(type, id = null) { state.drawer = { type, id }; render(); }
 function closeDrawer() { state.drawer = null; render(); }
 
 async function refresh(message) { await loadData(); render(); if (message) toast(message); }
+
+function rewriteNoteClassification(note, kind, id, label) {
+  const value=normalizeNote(note); const updatedAt=now();
+  return kind==='contentTypes'
+    ? normalizeNote({...value,contentType:id,contentTypeId:id,contentTypeLabel:label,updatedAt})
+    : normalizeNote({...value,categoryId:id,category:label,categoryLabel:label,updatedAt});
+}
+
+async function updateClassificationReferences(kind, sourceId, targetId, targetLabel) {
+  let changed=0;
+  const matches=(note)=>kind==='contentTypes'?normalizeNote(note).contentType===sourceId:noteCategoryId(note)===sourceId;
+  const updateList=async(notes,adapter)=>{
+    for(const note of notes.filter(matches)){await adapter.update(rewriteNoteClassification(note,kind,targetId,targetLabel));changed+=1;}
+  };
+  if(state.notesMode==='Memos') await updateList(state.notes,currentNotesAdapter());
+  await updateList(state.localClassificationNotes,new LocalNotesAdapter(storage));
+  for(const source of state.notesMode==='Memos'?['Local','Memos']:['Local']){
+    for(const draft of (await notesDrafts.list(source)).filter(matches)){
+      await notesDrafts.save({...rewriteNoteClassification(draft,kind,targetId,targetLabel),source,noteId:draft.noteId,revision:Number(draft.revision||0)+1});
+    }
+  }
+  return changed;
+}
 
 async function onSubmit(form) {
   const fd = new FormData(form); const d = state.drawer; const timestamp = now();
@@ -728,6 +778,9 @@ async function onSubmit(form) {
     state.radarMessage=''; state.drawer=null; await refresh(old?'探索方向已更新；当前批次保持不变':'探索方向已创建');
   }
   if (d.type === 'new-member' || d.type === 'edit-member') { const old=state.data.team.find((x)=>x.id===d.id); const m={id:old?.id||uid('member'),name:fd.get('name').trim(),email:fd.get('email').trim(),createdAt:old?.createdAt||timestamp,updatedAt:timestamp}; await storage.put('team',m); state.drawer=null; await refresh('成员已保存；历史名称保持不变'); }
+  if (d.type === 'new-classification') { state.classifications=classificationStore.add(state.classifications,d.kind,fd.get('label'));state.drawer=null;render();toast('分类已新增；未被 Memos 笔记引用前仅保存在当前浏览器'); }
+  if (d.type === 'edit-classification') { const label=String(fd.get('label')||'').trim().replace(/\s+/g,' ').slice(0,60);if(!label)throw new Error('名称不能为空');if(classificationItems(d.kind).some((item)=>item.id!==d.id&&item.label.toLocaleLowerCase()===label.toLocaleLowerCase()))throw new Error('已存在同名分类');await updateClassificationReferences(d.kind,d.id,d.id,label);state.classifications=classificationStore.rename(state.classifications,d.kind,d.id,label);state.drawer=null;await refresh('分类名称已更新，稳定 ID 与笔记关联保持不变'); }
+  if (d.type === 'delete-classification') { const count=classificationReferenceCount(d.kind,d.id);const replacementId=String(fd.get('replacementId')||'');if(count&&!replacementId){toast('请选择迁移目标','error');return;}let changed=0;if(replacementId){const replacement=classificationItems(d.kind).find((item)=>item.id===replacementId);if(!replacement)throw new Error('迁移目标不存在');changed=await updateClassificationReferences(d.kind,d.id,replacement.id,replacement.label);}state.classifications=classificationStore.remove(state.classifications,d.kind,d.id);if(d.kind==='contentTypes'&&state.categoryType===d.id)state.categoryType='All';if(d.kind==='categories'&&state.selectedCategory===d.id)state.selectedCategory='All';state.drawer=null;await refresh(changed?`已迁移 ${changed} 条笔记并删除分类`:'分类已删除'); }
 }
 
 async function exportData() {
@@ -812,11 +865,12 @@ async function saveNoteForm(form) {
   try {
     await flushNoteDraft();
     const fd = new FormData(form);
-    const content = fd.get('content').trim();
-    if (!content && !fd.get('title').trim()) { toast('标题和正文不能同时为空','error'); return; }
+    const content = String(fd.get('content')||'');
+    if (!content.trim() && !fd.get('title').trim()) { toast('标题和正文不能同时为空','error'); return; }
     const old = state.notes.find((note) => note.id === draftNoteId);
     const timestamp = now();
-    const note = normalizeNote({ id:old?.id||uid('note'), source, title:fd.get('title').trim(), content, category:fd.get('category'), contentType:fd.get('contentType'), purpose:String(fd.get('purpose')||'').trim(), sourceUrl:safeSourceUrl(fd.get('sourceUrl'), true), pinned:fd.get('pinned')==='on', createdAt:old?.createdAt||timestamp, updatedAt:timestamp });
+    const categoryId=String(fd.get('category')||'personal'); const contentTypeId=String(fd.get('contentType')||'note');
+    const note = normalizeNote({ id:old?.id||uid('note'), source, title:fd.get('title').trim(), content, categoryId, category:classificationLabel('categories',categoryId,'Personal'), categoryLabel:classificationLabel('categories',categoryId,'Personal'), contentType:contentTypeId, contentTypeId, contentTypeLabel:classificationLabel('contentTypes',contentTypeId,'笔记'), purpose:String(fd.get('purpose')||'').trim(), sourceUrl:safeSourceUrl(fd.get('sourceUrl'), true), pinned:fd.get('pinned')==='on', createdAt:old?.createdAt||timestamp, updatedAt:timestamp });
     const saved = old ? await currentNotesAdapter().update(note) : await currentNotesAdapter().create(note);
     await notesDrafts.delete(source,draftNoteId);
     state.noteId = saved?.id || note.id; state.noteDraft = null; state.noteDraftRevision=0; state.noteDraftRestored=false;
@@ -889,7 +943,8 @@ async function saveRadarToNotes(id) {
   const item = activeRadarBatch()?.items.find((entry) => entry.id === id);
   if (!item) return;
   const timestamp = now();
-  const note = normalizeNote({ id:uid('note'), source:state.notesMode, title:item.title, content:`${item.explanation}${item.changeSummary ? `\n\n本次变化：${item.changeSummary}` : ''}\n\n为什么值得关注：${item.why}\n\n来源：${item.sourceName}\n${item.sourceUrl}`, purpose:item.why || '', sourceUrl:item.sourceUrl || '', contentType:'note', pinned:false, category:CATEGORIES.includes(item.domain)?item.domain:'Learning', createdAt:timestamp, updatedAt:timestamp });
+  const matchedCategory=classificationItems('categories').find((entry)=>entry.label===item.domain); const categoryId=matchedCategory?.id||'learning';
+  const note = normalizeNote({ id:uid('note'), source:state.notesMode, title:item.title, content:`${item.explanation}${item.changeSummary ? `\n\n本次变化：${item.changeSummary}` : ''}\n\n为什么值得关注：${item.why}\n\n来源：${item.sourceName}\n${item.sourceUrl}`, purpose:item.why || '', sourceUrl:item.sourceUrl || '', contentType:'note', contentTypeId:'note', contentTypeLabel:classificationLabel('contentTypes','note','笔记'), pinned:false, categoryId, category:classificationLabel('categories',categoryId,'Learning'), categoryLabel:classificationLabel('categories',categoryId,'Learning'), createdAt:timestamp, updatedAt:timestamp });
   await currentNotesAdapter().create(note);
   await loadNotes();
   toast(`已保存到 Notes · ${note.category}`);
@@ -936,6 +991,9 @@ app.addEventListener('click', async (e) => {
   const task=e.target.closest('[data-task]'); if(task){state.taskId=task.dataset.task;state.taskHistoryTab='activity';state.route='task-detail';render();window.scrollTo({top:0});return;}
   const historyTab=e.target.closest('[data-history-tab]'); if(historyTab){state.taskHistoryTab=historyTab.dataset.historyTab;render();return;}
   const editMember=e.target.closest('[data-edit-member]'); if(editMember){openDrawer('edit-member',editMember.dataset.editMember);return;}
+  const addClassification=e.target.closest('[data-classification-add]'); if(addClassification){state.drawer={type:'new-classification',kind:addClassification.dataset.classificationAdd,id:null};render();return;}
+  const editClassification=e.target.closest('[data-classification-edit]'); if(editClassification){const [kind,id]=editClassification.dataset.classificationEdit.split(':');state.drawer={type:'edit-classification',kind,id};render();return;}
+  const deleteClassification=e.target.closest('[data-classification-delete]'); if(deleteClassification){const [kind,id]=deleteClassification.dataset.classificationDelete.split(':');state.drawer={type:'delete-classification',kind,id};render();return;}
   if(e.target.id==='export-data'){await exportData();return;}
   if(e.target.closest('[data-test-memos]')){await testMemosConnection();return;}
   if(e.target.closest('[data-connect-memos]')){await connectMemos();return;}
@@ -952,10 +1010,17 @@ app.addEventListener('click', async (e) => {
 });
 
 app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'||e.target.id==='note-editor-form'){e.preventDefault();try{if(e.target.id==='drawer-form')await onSubmit(e.target);else await saveNoteForm(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
+function applySearchInput(input) {
+  if(input.id==='category-search'){state.categorySearch=input.value;state.categoryExpandedId=null;render();const next=document.querySelector('#category-search');next?.focus();next?.setSelectionRange(next.value.length,next.value.length);return true;}
+  if(['task-search','note-search'].includes(input.id)){state.search=input.value;render();const next=document.querySelector(`#${input.id}`);next?.focus();next?.setSelectionRange(next.value.length,next.value.length);return true;}
+  return false;
+}
+app.addEventListener('compositionstart',(e)=>{if(['category-search','task-search','note-search'].includes(e.target.id))composingSearches.add(e.target.id);});
+app.addEventListener('compositionend',(e)=>{if(composingSearches.delete(e.target.id))applySearchInput(e.target);});
 app.addEventListener('input', (e) => {
   const editor=e.target.closest('#note-editor-form'); if(editor){scheduleNoteDraft(editor);return;}
-  if(e.target.id==='category-search'){state.categorySearch=e.target.value;state.categoryExpandedId=null;render();const input=document.querySelector('#category-search');input?.focus();input?.setSelectionRange(input.value.length,input.value.length);return;}
-  if(['task-search','note-search'].includes(e.target.id)){state.search=e.target.value;render();const input=document.querySelector(`#${e.target.id}`);input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+  if(composingSearches.has(e.target.id)||e.isComposing)return;
+  if(applySearchInput(e.target))return;
   if(['tavily-key','deepseek-key'].includes(e.target.id)) {
     radarCredentials.rememberSessionDraft({
       tavilyApiKey:document.querySelector('#tavily-key')?.value,

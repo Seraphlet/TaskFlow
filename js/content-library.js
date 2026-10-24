@@ -5,13 +5,15 @@
     { id:'sop', label:'SOP / 指南' },
     { id:'other', label:'其他' },
   ]);
-  const TYPE_IDS = new Set(CONTENT_TYPES.map((item) => item.id));
+  const legacyCategoryId = window.TaskFlowClassifications?.legacyCategoryId || ((value) => ({
+    'ai engineering':'ai-engineering', company:'company', learning:'learning', project:'project', personal:'personal'
+  }[String(value || '').trim().toLocaleLowerCase()] || ''));
   const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
   const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   function normalizeContentType(value) {
     const type = String(value || '').trim().toLowerCase();
-    return TYPE_IDS.has(type) ? type : 'note';
+    return /^[a-z0-9_-]{1,80}$/.test(type) ? type : 'note';
   }
 
   function safeSourceUrl(value, strict = false) {
@@ -28,9 +30,17 @@
   }
 
   function normalizeNote(note = {}) {
+    const contentType = normalizeContentType(note.contentTypeId || note.contentType);
+    const categoryLabel = String(note.categoryLabel || note.category || (note.companyName ? 'Company' : 'Personal')).trim() || 'Personal';
+    const categoryId = String(note.categoryId || legacyCategoryId(categoryLabel) || categoryLabel.toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'personal');
     return {
       ...note,
-      contentType:normalizeContentType(note.contentType),
+      contentType,
+      contentTypeId:contentType,
+      contentTypeLabel:String(note.contentTypeLabel || '').trim(),
+      category:categoryLabel,
+      categoryId,
+      categoryLabel,
       purpose:String(note.purpose ?? note.summary ?? ''),
       sourceUrl:safeSourceUrl(note.sourceUrl),
       pinned:Boolean(note.pinned),
@@ -43,14 +53,14 @@
 
   function noteSearchText(note) {
     const normalized = normalizeNote(note);
-    return [normalized.title, normalized.purpose, normalized.content, normalized.category, contentTypeLabel(normalized.contentType)].join(' ').toLocaleLowerCase();
+    return [normalized.title, normalized.purpose, normalized.content, normalized.categoryLabel, normalized.contentTypeLabel || contentTypeLabel(normalized.contentType)].join(' ').toLocaleLowerCase();
   }
 
   function searchNotes(notes, { query = '', contentType = 'All', category = 'All' } = {}) {
     const keywords = tokenize(query);
     return (notes || []).map(normalizeNote).filter((note) => (
       (contentType === 'All' || note.contentType === contentType) &&
-      (category === 'All' || note.category === category) &&
+      (category === 'All' || note.categoryId === category || note.category === category) &&
       (!keywords.length || keywords.some((keyword) => noteSearchText(note).includes(keyword)))
     )).sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
   }

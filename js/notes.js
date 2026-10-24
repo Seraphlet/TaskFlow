@@ -1,11 +1,14 @@
 (() => {
   const CONFIG_KEY = 'taskflow-notes-config-v1';
   const TOKEN_KEY = 'taskflow-memos-token-v1';
-  const MARKER = '<!-- taskflow-note:v1 ';
+  const LEGACY_MARKER = '<!-- taskflow-note:v1 ';
+  const META_MARKER = '<!-- taskflow:meta:v1';
   const normalizeNote = window.TaskFlowContentLibrary?.normalizeNote || ((note) => ({ ...note, contentType:note.contentType || 'note', purpose:note.purpose || '', sourceUrl:note.sourceUrl || '', pinned:Boolean(note.pinned) }));
 
-  const toBase64 = (value) => btoa(unescape(encodeURIComponent(JSON.stringify(value))));
   const fromBase64 = (value) => JSON.parse(decodeURIComponent(escape(atob(value))));
+  const textToBase64Url = (value) => btoa(unescape(encodeURIComponent(String(value || '')))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  const textFromBase64Url = (value) => decodeURIComponent(escape(atob(String(value || '').replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(value || '').length / 4) * 4, '='))));
+  const validId = (value) => /^[a-z0-9_-]{1,80}$/.test(String(value || ''));
   const timeValue = (value) => {
     if (!value) return new Date().toISOString();
     if (typeof value === 'string') return new Date(value).toISOString();
@@ -120,17 +123,60 @@
 
     encode(note) {
       const normalized = normalizeNote(note);
-      const metadata = toBase64({ title:normalized.title || '', category:normalized.category || (normalized.companyName ? 'Company' : 'Personal'), contentType:normalized.contentType, purpose:normalized.purpose, sourceUrl:normalized.sourceUrl, pinned:normalized.pinned });
-      return `${MARKER}${metadata} -->\n${normalized.content}`;
+      const content = String(normalized.content || '');
+      const contentType = validId(normalized.contentTypeId || normalized.contentType) ? (normalized.contentTypeId || normalized.contentType) : 'note';
+      const category = validId(normalized.categoryId) ? normalized.categoryId : 'personal';
+      const metadata = [
+        META_MARKER,
+        `contentType: ${contentType}`,
+        `category: ${category}`,
+        `contentTypeLabel64: ${textToBase64Url(normalized.contentTypeLabel || '')}`,
+        `categoryLabel64: ${textToBase64Url(normalized.categoryLabel || normalized.category || '')}`,
+        `title64: ${textToBase64Url(normalized.title || '')}`,
+        `purpose64: ${textToBase64Url(normalized.purpose || '')}`,
+        `sourceUrl64: ${textToBase64Url(normalized.sourceUrl || '')}`,
+        `pinned: ${normalized.pinned ? 'true' : 'false'}`,
+        `bodyLength: ${content.length}`,
+        '-->',
+      ].join('\n');
+      return `${content}\n\n${metadata}`;
     }
 
     decode(memo) {
       const content = String(memo.content || '');
+      const markerCount = content.split(META_MARKER).length - 1;
+      if (markerCount === 1) {
+        const match = /<!-- taskflow:meta:v1\r?\n([\s\S]*?)\r?\n-->\s*$/.exec(content);
+        if (!match) return null;
+        try {
+          const meta = {};
+          for (const line of match[1].split(/\r?\n/)) {
+            const pair = /^([A-Za-z][A-Za-z0-9]*):[ \t]*(.*)$/.exec(line);
+            if (!pair || Object.hasOwn(meta, pair[1])) return null;
+            meta[pair[1]] = pair[2];
+          }
+          if (!validId(meta.contentType) || !String(meta.category || '').trim() || String(meta.category).length > 80) return null;
+          let body;
+          if (meta.bodyLength !== undefined) {
+            const bodyLength = Number(meta.bodyLength);
+            if (!Number.isSafeInteger(bodyLength) || bodyLength < 0 || bodyLength > match.index || content.slice(bodyLength, match.index) !== '\n\n') return null;
+            body = content.slice(0, bodyLength);
+          } else {
+            const separator = content.slice(Math.max(0,match.index-4),match.index).endsWith('\r\n\r\n') ? 4 : content.slice(Math.max(0,match.index-2),match.index)==='\n\n' ? 2 : 0;
+            if (!separator) return null;
+            body = content.slice(0,match.index-separator);
+          }
+          const stableCategory = validId(meta.category) ? meta.category : '';
+          const categoryLabel = textFromBase64Url(meta.categoryLabel64 || '') || meta.category;
+          return normalizeNote({ id:memo.name, remoteId:memo.name, source:'Memos', title:textFromBase64Url(meta.title64 || ''), categoryId:stableCategory, category:categoryLabel, categoryLabel, contentType:meta.contentType, contentTypeId:meta.contentType, contentTypeLabel:textFromBase64Url(meta.contentTypeLabel64 || ''), purpose:textFromBase64Url(meta.purpose64 || ''), sourceUrl:textFromBase64Url(meta.sourceUrl64 || ''), pinned:meta.pinned === 'true', content:body, createdAt:timeValue(memo.createTime || memo.create_time), updatedAt:timeValue(memo.updateTime || memo.update_time) });
+        } catch { return null; }
+      }
+      if (markerCount > 1) return null;
       const match = content.match(/^<!-- taskflow-note:v1 ([A-Za-z0-9+/=]+) -->\n?/);
       if (!match) return null;
       try {
         const meta = fromBase64(match[1]);
-        return normalizeNote({ id:memo.name, remoteId:memo.name, source:'Memos', title:meta.title || '', category:meta.category || (meta.companyName ? 'Company' : 'Personal'), contentType:meta.contentType, purpose:meta.purpose, sourceUrl:meta.sourceUrl, pinned:meta.pinned, content:content.slice(match[0].length), createdAt:timeValue(memo.createTime || memo.create_time), updatedAt:timeValue(memo.updateTime || memo.update_time) });
+        return normalizeNote({ id:memo.name, remoteId:memo.name, source:'Memos', title:meta.title || '', category:meta.category || (meta.companyName ? 'Company' : 'Personal'), categoryId:meta.categoryId, categoryLabel:meta.categoryLabel, contentType:meta.contentType, contentTypeId:meta.contentTypeId, contentTypeLabel:meta.contentTypeLabel, purpose:meta.purpose, sourceUrl:meta.sourceUrl, pinned:meta.pinned, content:content.slice(match[0].length), createdAt:timeValue(memo.createTime || memo.create_time), updatedAt:timeValue(memo.updateTime || memo.update_time) });
       } catch { return null; }
     }
 
