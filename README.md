@@ -89,6 +89,8 @@ Notes 默认使用 Local。Settings 中可填写自己的 Memos 地址和 Person
 
 支持官方 Memos 26.10 / Latest 的 `/api` 与 0.30–0.31 的 `/api/v1`，并使用 Bearer Token。应用只读取和操作带有 TaskFlow 标记的远端 Memos，不会删除其他来源内容。新版记录把分类稳定 ID 与显示名称等 TaskFlow 信息写在正文末尾的 `taskflow:meta:v1` 注释块中，TaskFlow 编辑和展示时隐藏该块；旧版正文开头的 Base64 标记仍可读取，并会在下次保存时迁移。损坏或重复的新版标记不会被猜测性删除，正文内容、Markdown、普通 HTML 注释和换行会原样保留。
 
+仅填写标题的远端 Note 会把标题同时作为 Memos 可见文本，并通过 `titleOnly` 元数据在 TaskFlow 中恢复为“标题有值、正文为空”；后续增加或删除正文时会自动切换，不会重复追加标题。
+
 分类配置本身保存在当前浏览器。尚未被笔记引用的自定义分类不会跨设备同步；被 Memos 笔记引用后，分类 ID 与名称会随该笔记元数据恢复。删除已有引用的分类时，界面会要求先选择迁移目标。
 
 浏览器从 `file://` 访问远端 Memos 可能因 CORS 或 `Origin: null` 被拒绝。应用不会绕过浏览器安全策略，也不会把 Token 发送给第三方代理；遇到此情况可继续使用 Local，或将静态页面部署到 Memos 允许的受信任来源。

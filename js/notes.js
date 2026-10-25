@@ -124,6 +124,10 @@
     encode(note) {
       const normalized = normalizeNote(note);
       const content = String(normalized.content || '');
+      const title = String(normalized.title || '');
+      if (!title.trim() && !content.trim()) throw new Error('标题和正文不能同时为空');
+      const titleOnly = Boolean(title.trim() && !content.trim());
+      const visibleContent = titleOnly ? title : content;
       const contentType = validId(normalized.contentTypeId || normalized.contentType) ? (normalized.contentTypeId || normalized.contentType) : 'note';
       const category = validId(normalized.categoryId) ? normalized.categoryId : 'personal';
       const metadata = [
@@ -132,14 +136,15 @@
         `category: ${category}`,
         `contentTypeLabel64: ${textToBase64Url(normalized.contentTypeLabel || '')}`,
         `categoryLabel64: ${textToBase64Url(normalized.categoryLabel || normalized.category || '')}`,
-        `title64: ${textToBase64Url(normalized.title || '')}`,
+        `title64: ${textToBase64Url(title)}`,
+        `titleOnly: ${titleOnly ? 'true' : 'false'}`,
         `purpose64: ${textToBase64Url(normalized.purpose || '')}`,
         `sourceUrl64: ${textToBase64Url(normalized.sourceUrl || '')}`,
         `pinned: ${normalized.pinned ? 'true' : 'false'}`,
-        `bodyLength: ${content.length}`,
+        `bodyLength: ${visibleContent.length}`,
         '-->',
       ].join('\n');
-      return `${content}\n\n${metadata}`;
+      return `${visibleContent}\n\n${metadata}`;
     }
 
     decode(memo) {
@@ -166,9 +171,12 @@
             if (!separator) return null;
             body = content.slice(0,match.index-separator);
           }
+          if (meta.titleOnly !== undefined && !['true','false'].includes(meta.titleOnly)) return null;
           const stableCategory = validId(meta.category) ? meta.category : '';
           const categoryLabel = textFromBase64Url(meta.categoryLabel64 || '') || meta.category;
-          return normalizeNote({ id:memo.name, remoteId:memo.name, source:'Memos', title:textFromBase64Url(meta.title64 || ''), categoryId:stableCategory, category:categoryLabel, categoryLabel, contentType:meta.contentType, contentTypeId:meta.contentType, contentTypeLabel:textFromBase64Url(meta.contentTypeLabel64 || ''), purpose:textFromBase64Url(meta.purpose64 || ''), sourceUrl:textFromBase64Url(meta.sourceUrl64 || ''), pinned:meta.pinned === 'true', content:body, createdAt:timeValue(memo.createTime || memo.create_time), updatedAt:timeValue(memo.updateTime || memo.update_time) });
+          const title = textFromBase64Url(meta.title64 || '');
+          const noteContent = meta.titleOnly === 'true' && body === title ? '' : body;
+          return normalizeNote({ id:memo.name, remoteId:memo.name, source:'Memos', title, categoryId:stableCategory, category:categoryLabel, categoryLabel, contentType:meta.contentType, contentTypeId:meta.contentType, contentTypeLabel:textFromBase64Url(meta.contentTypeLabel64 || ''), purpose:textFromBase64Url(meta.purpose64 || ''), sourceUrl:textFromBase64Url(meta.sourceUrl64 || ''), pinned:meta.pinned === 'true', content:noteContent, createdAt:timeValue(memo.createTime || memo.create_time), updatedAt:timeValue(memo.updateTime || memo.update_time) });
         } catch { return null; }
       }
       if (markerCount > 1) return null;

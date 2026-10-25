@@ -47,6 +47,33 @@ const { NotesDraftStore, MemosNotesAdapter } = context.window.TaskFlowNotes;
   assert.strictEqual(decoded.pinned, true);
   assert.strictEqual(decoded.content, '完整正文');
   assert.strictEqual(decoded.categoryId, 'ai-engineering');
+  assert(encoded.startsWith('完整正文\n\n<!-- taskflow:meta:v1'), 'title + body keeps the body as Memos-visible text');
+  assert(encoded.includes('\ntitleOnly: false\n'));
+
+  const titleOnlyEncoded = adapter.encode({ title:'只有标题', content:'', categoryId:'personal', category:'Personal', contentType:'note' });
+  assert(titleOnlyEncoded.startsWith('只有标题\n\n<!-- taskflow:meta:v1'), 'title-only notes must expose the title to native Memos');
+  assert(titleOnlyEncoded.includes('\ntitleOnly: true\n'));
+  const titleOnlyDecoded = adapter.decode({ name:'memo-title-only', content:titleOnlyEncoded });
+  assert.strictEqual(titleOnlyDecoded.title, '只有标题');
+  assert.strictEqual(titleOnlyDecoded.content, '', 'the visible title must not become TaskFlow body content');
+  const titleOnlySavedAgain = adapter.encode(titleOnlyDecoded);
+  assert.strictEqual((titleOnlySavedAgain.match(/只有标题/g)||[]).length, 1, 'repeated title-only saves must not duplicate the visible title');
+  assert.strictEqual((titleOnlySavedAgain.match(/<!-- taskflow:meta:v1/g)||[]).length, 1);
+
+  const withBodyEncoded = adapter.encode({ ...titleOnlyDecoded, content:'后来补充的正文' });
+  assert(withBodyEncoded.startsWith('后来补充的正文\n\n<!-- taskflow:meta:v1'), 'adding body text must stop mirroring the title');
+  const withBodyDecoded = adapter.decode({ name:'memo-with-body', content:withBodyEncoded });
+  assert.strictEqual(withBodyDecoded.title, '只有标题');
+  assert.strictEqual(withBodyDecoded.content, '后来补充的正文');
+  const bodyRemovedDecoded = adapter.decode({ name:'memo-body-removed', content:adapter.encode({ ...withBodyDecoded, content:'' }) });
+  assert.strictEqual(bodyRemovedDecoded.title, '只有标题');
+  assert.strictEqual(bodyRemovedDecoded.content, '', 'removing body text must restore title-only semantics');
+
+  const bodyOnlyEncoded = adapter.encode({ title:'', content:'只有正文', categoryId:'personal', category:'Personal', contentType:'note' });
+  const bodyOnlyDecoded = adapter.decode({ name:'memo-body-only', content:bodyOnlyEncoded });
+  assert.strictEqual(bodyOnlyDecoded.title, '');
+  assert.strictEqual(bodyOnlyDecoded.content, '只有正文');
+  assert.throws(() => adapter.encode({ title:'  ', content:'\n', categoryId:'personal', contentType:'note' }), /标题和正文不能同时为空/);
 
   const markdown = '正文中的 --- 不变。\n\n```html\n<!-- ordinary comment -->\n```\n';
   const roundTrip = adapter.decode({ name:'memo-round-trip', content:adapter.encode({ content:markdown, categoryId:'personal', category:'Personal', contentType:'note' }) });
