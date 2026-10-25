@@ -2,6 +2,8 @@
 
 一个无构建依赖的本地优先个人工作台，包含 Home、临时暂存、个人待办、日历提醒、模板中心、Radar、Notes、Categories、Tasks 和按需加载的 Playground。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，个人事项、任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
 
+更换开发设备或重新接手项目时，请先阅读 [`docs/Toward-the-Sea-Handoff-2026-10-25.md`](docs/Toward-the-Sea-Handoff-2026-10-25.md)。
+
 首页背景固定引用 `images/home-background.webp`。更换壁纸时直接覆盖同名文件即可，不需要修改源码。FastAPI 静态服务会返回 `Cache-Control: public, max-age=0, must-revalidate`，并通过 ETag / Last-Modified 复用未变化的图片。直接双击 `index.html` 的 `file://` 模式不具备 HTTP 条件缓存语义。
 
 如果使用当前常见的 Nginx `/taskflow/` 静态路径部署，请把下面的精确匹配放在同一个 HTTPS `server` 中；路径不同时同步调整 URL 和文件位置：
