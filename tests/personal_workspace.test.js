@@ -1,0 +1,24 @@
+const assert=require('assert');
+const fs=require('fs');
+const vm=require('vm');
+const context={window:{},Date};
+vm.runInNewContext(fs.readFileSync('js/personal-workspace.js','utf8'),context);
+const api=context.window.TaskFlowPersonalWorkspace;
+
+const now=Date.parse('2026-10-25T12:00:00Z');
+assert.strictEqual(api.isExpiredCapture({status:'pending',completedAt:'2020-01-01T00:00:00Z'},now),false);
+assert.strictEqual(api.isExpiredCapture({status:'completed',completedAt:'2026-10-24T11:59:59Z'},now),true);
+assert.strictEqual(api.isExpiredCapture({status:'completed',completedAt:'2026-10-25T11:00:00Z'},now),false);
+assert.strictEqual(api.todoMatchesView({completed:false,plannedDate:'2026-10-25'},'today','2026-10-25'),true);
+assert.strictEqual(api.todoMatchesView({completed:false},'today','2026-10-25'),false,'undated todos are not today');
+assert.strictEqual(api.todoMatchesView({completed:false,dueDate:'2026-10-26'},'upcoming','2026-10-25'),true);
+assert.strictEqual(api.todoMatchesView({status:'completed',plannedDate:'2026-10-25'},'today','2026-10-25'),false);
+assert.strictEqual(api.todoMatchesView({status:'completed'},'completed','2026-10-25'),true);
+assert.strictEqual(api.shiftDate('2026-10-31',1),'2026-11-01');
+assert.strictEqual(api.reminderId('todo','abc'),'reminder:todo:abc');
+assert.deepStrictEqual(Array.from(api.extractTemplateVariables('{{项目名称}} / {{ 交付时间 }} / {{项目名称}}')),['项目名称','交付时间']);
+assert.strictEqual(api.fillTemplate('你好 {{姓名}}，{{事项}}',{姓名:'小安'}),'你好 小安，{{事项}}');
+assert.strictEqual(api.monthGrid(2026,9).length,42);
+assert.strictEqual(api.monthGrid('2026-10')[0].date,'2026-09-28','month grid starts on Monday');
+assert.deepStrictEqual(Array.from(api.dueReminders([{id:'due',status:'pending',remindAt:'2026-10-25T11:00:00Z'},{id:'read',status:'read',remindAt:'2026-10-25T10:00:00Z'}],now)).map((item)=>item.id),['due']);
+console.log('Personal workspace domain tests passed');

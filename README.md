@@ -1,6 +1,6 @@
 # TaskFlow Workspace V1
 
-一个无构建依赖的本地优先个人工作台，包含 Home、Radar、Notes、Categories、Tasks 和按需加载的 Playground。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
+一个无构建依赖的本地优先个人工作台，包含 Home、临时暂存、个人待办、日历提醒、模板中心、Radar、Notes、Categories、Tasks 和按需加载的 Playground。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，个人事项、任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
 
 首页背景固定引用 `images/home-background.webp`。更换壁纸时直接覆盖同名文件即可，不需要修改源码。FastAPI 静态服务会返回 `Cache-Control: public, max-age=0, must-revalidate`，并通过 ETag / Last-Modified 复用未变化的图片。直接双击 `index.html` 的 `file://` 模式不具备 HTTP 条件缓存语义。
 
@@ -49,6 +49,7 @@ js/classifications.js   内容类型与主题分类的稳定 ID、本地配置�
 js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版本兼容
 js/content-library.js   内容类型兼容、组合检索、高亮与来源链接校验
 js/radar.js             Radar Item 模型、演示 Provider 与生成边界
+js/personal-workspace.js 暂存、待办、提醒、月历与模板变量的领域规则
 js/playground/           按需加载的 Music、Keyboard 与 Life Geometry 独立作品及人生引擎
 docs/                   Life Geometry JSON 契约说明
 examples/               可直接导入的人物模板与固定故事 JSON
@@ -70,7 +71,10 @@ tests/                  凭证安全、模型校验和 API 边界测试
 
 ## 数据与兼容性
 
-- Tasks、Team、Activity、Handoffs、Local Notes、Notes 草稿与 Radar Profiles / Batches 保存在当前浏览器的 IndexedDB 中。
+- Tasks、Team、Activity、Handoffs、Local Notes、Notes 草稿、Radar Profiles / Batches，以及 Captures、Todos、Calendar Events、Templates、Reminders 分别保存在当前浏览器的 IndexedDB 独立集合中。
+- 临时暂存用于无结构的快速收集；待处理内容长期保留，完成内容可立即撤销并在 24 小时后自动清理。转为个人待办使用稳定来源关联，重复操作不会创建第二条待办。个人待办与可交接的 Task 是两套独立数据。
+- 日历只聚合指定日期的个人待办与独立事件，不复制其正文。提醒引用待办或事件 ID，并记录已读/忽略状态；网页关闭时不承诺后台通知，重新打开后会补显已到期提醒。
+- 模板中心只保存模板原文、分类与收藏状态；`{{变量}}` 在预览和复制时临时填充，空值继续保留占位符，不会修改模板原文。模板不会同步到 Memos。
 - Notes 草稿按数据源与 Note ID 隔离并自动保存；刷新或关闭后会恢复上次打开的草稿。正式保存成功才清除草稿，失败仍保留。Web Locks 可用时使用单编辑锁，并始终以修订号阻止旧异步写入覆盖新内容。
 - Categories 直接复用 Notes 数据，不维护独立分类数据库。Note 可增量保存 `contentType`、`purpose`、`sourceUrl` 与 `pinned`；内容类型和主题分类在 Settings 统一管理，使用稳定 ID 保持重命名兼容。两类分类可组合筛选，并支持多关键词、可自定义快捷标签、命中高亮、全文展开与复制。旧 Note 缺少新字段时默认作为“笔记”读取，存在 `companyName` 时继续兼容显示为 `Company`。
 - Radar 的 Profile、当前 Batch 与探索历史分开保存。每个 Profile 独立恢复自己的当前批次和历史；切换方向不会覆盖其他方向。成功、无新内容、失败、中断及达到客户端限额都会留下历史记录。
@@ -80,7 +84,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 - 客户端单日联网探索上限默认 3 次，可在 Settings 设置为 1–50；计数按当前设备的本地日期和浏览器数据计算，测试连接、演示探索、被互斥锁拒绝及达到限额的操作不消耗次数。
 - Tavily 搜索深度默认 `basic`（官方计费 1 credit）；`advanced` 为 2 credits。可通过 `TASKFLOW_TAVILY_SEARCH_DEPTH=basic|advanced|fast|ultra-fast` 调整。月度硬预算默认每组凭证身份 1000 credits，通过 `TASKFLOW_TAVILY_MONTHLY_CREDIT_BUDGET` 调整（旧变量 `TASKFLOW_TAVILY_MONTHLY_BUDGET` 仍兼容）。请求发出前原子预留 credits，成功响应优先使用官方 `usage.credits` 结算；响应无法确认时保留保守预留并在历史中标记。预算、缓存和跨 Profile 去重使用不可逆 HMAC 身份隔离，SQLite 数据在服务重启后继续有效。
 - 已退役的 `companies` / `comments` 仓库仅为旧数据库和备份结构兼容而保留，不再加载到应用状态，也不再提供查看、编辑或迁移入口。
-- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1–V6 备份均可兼容导入。Memos 远端数据和访问令牌不会进入导出文件。
+- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1–V7 备份均可兼容导入。V7 备份包含个人暂存、待办、事件、模板和提醒；导入时已经超过保留期限的已完成暂存会被跳过。Memos 远端数据和访问令牌不会进入导出文件。
 - `file://` 存储可能被不同浏览器或文件路径隔离。启动时若 IndexedDB 不可用，应用会明确报错而不是静默丢失数据。
 
 ## Memos（可选）

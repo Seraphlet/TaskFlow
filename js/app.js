@@ -4,6 +4,7 @@ const { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore, NotesDraftSt
 const { DemoRadarProvider, RemoteRadarProvider, RadarCredentialStore, DEFAULT_MODEL_ID, DEFAULT_DAILY_LIMIT, DEFAULT_PROFILE, QUOTAS, normalizeLegacyItems, usedIdsThroughLegacyIndex } = window.TaskFlowRadar;
 const { normalizeNote, tokenize, searchNotes, highlightHtml, contentTypeLabel, contentSummary, safeSourceUrl } = window.TaskFlowContentLibrary;
 const { ClassificationStore, DEFAULT_CONTENT_TYPES, DEFAULT_CATEGORIES } = window.TaskFlowClassifications;
+const { TEMPLATE_DEFAULT_CATEGORIES, localDateKey, isExpiredCapture, todoMatchesView, shiftDate, reminderId, dueReminders, extractTemplateVariables, fillTemplate, monthGrid } = window.TaskFlowPersonalWorkspace;
 
 const storage = new LocalStorageAdapter();
 const notifications = new NoopNotificationAdapter();
@@ -21,11 +22,12 @@ const NOTES_UI_KEY = 'taskflow-notes-ui-v1';
 const CATEGORY_TAGS_KEY = 'taskflow-content-quick-tags-v1';
 const DEFAULT_CATEGORY_TAGS = ['总结', '翻译', '代码', '写作'];
 function loadCategoryQuickTags() { try { const value=JSON.parse(localStorage.getItem(CATEGORY_TAGS_KEY)); return Array.isArray(value) ? value.map((item)=>String(item).trim()).filter(Boolean).slice(0,20) : [...DEFAULT_CATEGORY_TAGS]; } catch { return [...DEFAULT_CATEGORY_TAGS]; } }
-const state = { route: 'home', playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', categorySearch:'', categoryType:'All', categoryExpandedId:null, categoryQuickTags:loadCategoryQuickTags(), categoryTagEditor:false, classifications:classificationStore.read(), localClassificationNotes:[], status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
+const state = { route: 'home', playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', categorySearch:'', categoryType:'All', categoryExpandedId:null, categoryQuickTags:loadCategoryQuickTags(), categoryTagEditor:false, classifications:classificationStore.read(), localClassificationNotes:[], todoView:'today', calendarMonth:localDateKey().slice(0,7), calendarDate:localDateKey(), templateSearch:'', templateCategory:'All', templateFavorites:false, templateId:null, templateValues:{}, status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
 let noteDraftTimer = null;
 let noteDraftWrite = Promise.resolve();
 let appLoaded = false;
 let homeClockTimer = null;
+let captureCleanupTimer = null;
 let activeArtwork = null;
 let artworkLoadToken = 0;
 const composingSearches = new Set();
@@ -39,9 +41,36 @@ const now = () => new Date().toISOString();
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const dateText = (iso) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
 const badge = (status) => `<span class="badge ${String(status || 'Todo').toLowerCase()}">${esc(STATUS_LABELS[status] || status || '待办')}</span>`;
+const dateTimeLocalValue = (value) => { if (!value) return ''; const date=new Date(value); if(Number.isNaN(date.getTime())) return ''; const offset=date.getTimezoneOffset()*60000; return new Date(date.getTime()-offset).toISOString().slice(0,16); };
+const shortDateText = (value) => value ? new Intl.DateTimeFormat('zh-CN',{month:'short',day:'numeric',weekday:'short'}).format(new Date(`${value}T12:00:00`)) : '未安排日期';
+const captureText = (item) => esc(item.content || '').replace(/\n/g,'<br>');
+
+function upcomingEvents(limit = 4) {
+  const start=localDateKey();
+  return [...state.data.calendarEvents].filter((item)=>localDateKey(new Date(item.startAt))>=start).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt))).slice(0,limit);
+}
+
+function todayTodos() {
+  const today=localDateKey();
+  return state.data.todos.filter((item)=>item.status!=='completed'&&(item.plannedDate===today||item.dueDate===today));
+}
+
+function reminderTitle(item) {
+  const source=item.sourceType==='todo'?state.data.todos.find((entry)=>entry.id===item.sourceId):state.data.calendarEvents.find((entry)=>entry.id===item.sourceId);
+  return source?.title || item.title || '已删除的事项';
+}
+
+async function syncReminder(sourceType, source, remindAt) {
+  const id=reminderId(sourceType,source.id);
+  if(!remindAt){await storage.delete('reminders',id);return;}
+  const existing=await storage.get('reminders',id);
+  const sameMoment=existing?.remindAt===remindAt;
+  await storage.put('reminders',{id,sourceType,sourceId:source.id,title:source.title,remindAt,status:sameMoment?(existing.status||'pending'):'pending',createdAt:existing?.createdAt||source.createdAt||now(),updatedAt:now()});
+}
 
 async function loadData() {
   await storage.init();
+  await storage.deleteWhere('captures',(item)=>isExpiredCapture(item));
   const appStores = ACTIVE_STORES || STORES.filter((name) => !['companies', 'comments'].includes(name));
   const entries = await Promise.all(appStores.map(async (name) => [name, await storage.all(name)]));
   state.data = Object.fromEntries(entries);
@@ -178,12 +207,13 @@ async function loadNotes() {
   if (!appLoaded && saved.open && state.noteId) state.route = 'notes';
 }
 
-function toast(message, type = '') {
+function toast(message, type = '', action = null) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = message;
+  el.append(document.createTextNode(message));
+  if(action){const button=document.createElement('button');button.type='button';button.textContent=action.label;Object.entries(action.dataset||{}).forEach(([key,value])=>button.dataset[key]=value);el.append(button);}
   document.querySelector('#toast-region').append(el);
-  setTimeout(() => el.remove(), 3200);
+  setTimeout(() => el.remove(), action?6000:3200);
 }
 
 function shell(content, title, subtitle) {
@@ -195,12 +225,18 @@ function shell(content, title, subtitle) {
       <div class="nav-kicker">工作空间</div>
       <nav class="nav-list" aria-label="主导航">
         ${navButton('home','⌂','首页')}
+        ${navButton('capture','＋','临时暂存')}
+        ${navButton('todos','✓','个人待办')}
+        ${navButton('calendar','□','日历提醒')}
+        ${navButton('templates','▤','模板中心')}
+        <span class="nav-divider">知识与工作</span>
         ${navButton('radar','⌁','探索雷达')}
         ${navButton('notes','✎','随手笔记')}
         ${navButton('categories','◇','内容分类')}
         ${navButton('tasks','▣','任务管理')}
         ${navButton('playground','✦','数字艺术')}
       </nav>
+      <button class="global-capture" type="button" data-open="new-capture">＋ 快速暂存</button>
       <div class="local-note"><span class="storage-dot"></span><div><b>本地优先</b><small>Notes 数据源：${esc(state.notesMode)}</small></div><button class="sidebar-settings" data-nav="settings" aria-label="打开设置">⚙</button></div>
     </aside>
     <main class="main"><header class="topbar"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><div class="topbar-state"><span class="status-pulse"></span><span>${['notes','categories'].includes(state.route) ? esc(state.notesMode) : '本地存储'}</span></div></header>${content}</main>
@@ -274,6 +310,11 @@ function homePage() {
   const recentNotes = [...state.notes].sort((a,b) => String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).slice(0, 3);
   const radarBatch = activeRadarBatch();
   const radarItems = (radarBatch?.items || []).slice(0, 2);
+  const allCaptures=[...state.data.captures].filter((item)=>item.status!=='completed').sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const captures=allCaptures.slice(0,3);
+  const dayTodos=todayTodos().slice(0,4);
+  const events=upcomingEvents(3);
+  const reminders=dueReminders(state.data.reminders).slice(0,3);
   const today = homeDateParts();
   const focusContent = focusTask ? `<span class="home-card-kicker">当前焦点</span><div class="home-focus-title"><h3>${esc(focusTask.title)}</h3>${badge(focusTask.status)}</div><p class="prose">${esc(focusTask.next || focusTask.requirement || '暂未设置下一步')}</p><button class="btn dark" data-task="${esc(focusTask.id)}">打开任务 →</button>` : `<span class="home-card-kicker">当前焦点</span><h3>从一件具体的事开始</h3><p>还没有待推进的任务。创建任务后，这里会显示真实的下一步。</p><button class="btn dark" data-open="new-task">＋ 新建任务</button>`;
   return shell(`<section class="page home-page">
@@ -281,12 +322,64 @@ function homePage() {
     <div class="home-bento">
       <article class="home-card home-card-interactive home-focus">${focusContent}</article>
       <article class="home-card home-date" aria-label="今日日期"><span class="home-card-kicker">今日日期</span><time data-home-date datetime="${today.date}"><strong data-home-date-day>${today.day}</strong><span><b data-home-date-weekday>${today.weekday}</b><small><i data-home-date-month>${today.month}</i> · <i data-home-date-year>${today.year}</i></small></span></time></article>
+      <article class="home-card home-card-interactive home-capture"><div class="home-card-head"><div><span class="home-card-kicker">快速暂存</span><h4>先记下来</h4></div><button class="home-link" data-nav="capture">暂存箱 ${allCaptures.length} →</button></div><form id="home-capture-form" class="home-capture-form"><textarea name="content" required placeholder="一句话、一个链接或突然想到的事……"></textarea><button type="submit">保存</button></form>${captures.length?`<div class="home-compact-list">${captures.map((item)=>`<button data-nav="capture"><b>${esc(item.content.split(/\n/)[0].slice(0,52))}</b><span>${dateText(item.createdAt)}</span></button>`).join('')}</div>`:'<p class="home-empty">暂无待处理暂存。</p>'}</article>
+      <article class="home-card home-card-interactive home-todos"><div class="home-card-head"><div><span class="home-card-kicker">今天</span><h4>${dayTodos.length} 件个人待办</h4></div><button class="home-link" data-nav="todos">查看待办 →</button></div>${dayTodos.length?`<div class="home-compact-list">${dayTodos.map((item)=>`<button data-nav="todos"><b>${esc(item.title)}</b><span>${item.dueDate===today.date?'今天截止':'今天计划'}</span></button>`).join('')}</div>`:'<p class="home-empty">今天没有已安排的个人待办。</p>'}</article>
+      <article class="home-card home-card-interactive home-agenda"><div class="home-card-head"><div><span class="home-card-kicker">接下来</span><h4>日历事件</h4></div><button class="home-link" data-nav="calendar">打开日历 →</button></div>${events.length?`<div class="home-compact-list">${events.map((item)=>`<button data-nav="calendar"><b>${esc(item.title)}</b><span>${dateText(item.startAt)}</span></button>`).join('')}</div>`:'<p class="home-empty">暂无即将开始的事件。</p>'}</article>
+      <article class="home-card home-card-interactive home-reminders"><div class="home-card-head"><div><span class="home-card-kicker">提醒中心</span><h4>${reminders.length} 条到期</h4></div><button class="home-link" data-nav="calendar">处理提醒 →</button></div>${reminders.length?`<div class="home-compact-list">${reminders.map((item)=>`<button data-nav="calendar"><b>${esc(reminderTitle(item))}</b><span>${dateText(item.remindAt)}</span></button>`).join('')}</div>`:'<p class="home-empty">没有到期提醒。</p>'}</article>
       <article class="home-card home-card-interactive home-tasks"><div class="home-card-head"><div><span class="home-card-kicker">任务节奏</span><h4>${tasks.length} 个任务</h4></div><button class="home-link" data-nav="tasks">查看全部 →</button></div><div class="home-task-counts">${STATUS.map((status)=>`<div><b>${taskCounts[status]}</b><span>${STATUS_LABELS[status]}</span></div>`).join('')}</div></article>
       <article class="home-card home-card-interactive home-notes"><div class="home-card-head"><div><span class="home-card-kicker">最近记录</span><h4>${state.notesMode} Notes</h4></div><button class="home-link" data-nav="notes">打开笔记 →</button></div>${recentNotes.length?`<div class="home-note-list">${recentNotes.map((note)=>`<button data-open-note="${esc(note.id)}"><b>${esc(note.title || note.content?.split(/\n/)[0]?.slice(0,40) || '未命名记录')}</b><span>${esc(noteCategory(note))} · ${dateText(note.updatedAt)}</span></button>`).join('')}</div>`:'<p class="home-empty">还没有记录，随手写下第一条想法。</p>'}</article>
-      <article class="home-card home-card-interactive home-radar"><div class="home-card-head"><div><span class="home-card-kicker">探索窗口</span><h4>${esc(activeRadarProfile()?.name || '探索雷达')}</h4></div><button class="home-link" data-nav="radar">进入 Radar →</button></div>${radarItems.length?`<div class="home-radar-list">${radarItems.map((item)=>`<div><span>${esc(item.section)}</span><b>${esc(item.title)}</b></div>`).join('')}</div>`:'<p class="home-empty">当前方向还没有可展示的探索内容。</p>'}</article>
-      <article class="home-card home-card-interactive home-actions"><div><span class="home-card-kicker">快捷操作</span><h4>直接开始</h4></div><div class="home-action-list"><button data-open="new-task"><span>＋</span>新建任务</button><button data-new-note><span>✎</span>写笔记</button><button data-nav="radar"><span>⌁</span>打开 Radar</button></div></article>
+      <article class="home-card home-card-interactive home-actions"><div><span class="home-card-kicker">快捷操作</span><h4>知识与工作</h4></div><div class="home-action-list"><button data-open="new-task"><span>＋</span>新建任务</button><button data-new-note><span>✎</span>写笔记</button><button data-nav="radar"><span>⌁</span>${radarItems.length?'查看 Radar':'打开 Radar'}</button></div></article>
     </div>
   </section>`, '首页', '本地工作台 · 不主动联网');
+}
+
+function capturePage() {
+  const pending=[...state.data.captures].filter((item)=>item.status!=='completed').sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const completed=[...state.data.captures].filter((item)=>item.status==='completed').sort((a,b)=>String(b.completedAt||'').localeCompare(String(a.completedAt||'')));
+  const row=(item,done=false)=>`<article class="capture-row ${done?'is-complete':''}"><button class="capture-check" type="button" data-${done?'undo':'complete'}-capture="${esc(item.id)}" aria-label="${done?'撤销完成':'标记完成'}">${done?'↶':'✓'}</button><div class="capture-content"><p>${captureText(item)}</p><small>${dateText(item.createdAt)}${item.convertedTodoId?' · 已转为待办':''}</small></div><div class="row-actions">${done?'':`<button class="btn small" data-convert-capture="${esc(item.id)}">转为待办</button><button class="btn small" data-edit-capture="${esc(item.id)}">编辑</button>`}<button class="icon-btn danger" data-delete-capture="${esc(item.id)}" aria-label="删除">×</button></div></article>`;
+  return shell(`<section class="page work-page personal-page"><div class="page-head compact"><div><span class="eyebrow">QUICK CAPTURE</span><h3>先接住，再整理</h3><p>临时内容不要求标题和分类；完成后隐藏，并在 24 小时后自动清理。</p></div></div>
+    <form class="quick-entry card" id="capture-form"><label class="sr-only" for="capture-content">临时暂存内容</label><textarea id="capture-content" class="textarea" name="content" required placeholder="粘贴链接、写下一句话，按保存即可……"></textarea><button class="btn primary" type="submit">保存暂存</button></form>
+    <div class="section-head"><div><h4>待处理</h4><span>${pending.length}</span></div></div><div class="capture-list">${pending.length?pending.map((item)=>row(item)).join(''):empty('暂存箱是空的','从左侧或本页快速记下一条内容。')}</div>
+    <details class="completed-captures"><summary>最近完成（${completed.length}）</summary><div class="capture-list">${completed.length?completed.map((item)=>row(item,true)).join(''):'<p class="subtle">暂无最近完成内容。</p>'}</div></details>
+  </section>`,'临时暂存',`${pending.length} 条待处理 · 完成内容保留 24 小时`);
+}
+
+function todosPage() {
+  const views={today:'今天',upcoming:'未来',all:'全部',completed:'已完成'};
+  const items=[...state.data.todos].filter((item)=>todoMatchesView(item,state.todoView)).sort((a,b)=>String(a.plannedDate||a.dueDate||'9999').localeCompare(String(b.plannedDate||b.dueDate||'9999'))||String(b.createdAt).localeCompare(String(a.createdAt)));
+  return shell(`<section class="page work-page personal-page"><div class="page-head compact"><div><span class="eyebrow">PERSONAL TO-DO</span><h3>个人待办</h3><p>轻量安排生活事项，与需要跟踪和交接的 Task 相互独立。</p></div><button class="btn primary" data-open="new-todo">＋ 新建待办</button></div>
+    <form class="quick-entry inline card" id="todo-quick-form"><label class="sr-only" for="todo-quick-title">快速新增待办</label><input class="input" id="todo-quick-title" name="title" required maxlength="160" placeholder="快速新增一件待办"><button class="btn primary" type="submit">添加</button></form>
+    <div class="segment-control" role="tablist">${Object.entries(views).map(([key,label])=>`<button type="button" class="${state.todoView===key?'active':''}" data-todo-view="${key}">${label}</button>`).join('')}</div>
+    <div class="todo-list">${items.length?items.map((item)=>`<article class="todo-row ${item.status==='completed'?'is-complete':''}"><button class="capture-check" data-toggle-todo="${esc(item.id)}" aria-label="切换完成状态">${item.status==='completed'?'✓':'○'}</button><div><h4>${esc(item.title)}</h4>${item.notes?`<p>${esc(item.notes)}</p>`:''}<div class="item-meta">${item.plannedDate?`<span>计划 ${shortDateText(item.plannedDate)}</span>`:''}${item.dueDate?`<span>截止 ${shortDateText(item.dueDate)}</span>`:''}${item.remindAt?`<span>提醒 ${dateText(item.remindAt)}</span>`:''}</div></div><div class="row-actions">${item.status!=='completed'&&item.plannedDate?`<button class="btn small" data-postpone-todo="${esc(item.id)}">顺延一天</button>`:''}<button class="btn small" data-edit-todo="${esc(item.id)}">编辑</button><button class="icon-btn danger" data-delete-todo="${esc(item.id)}" aria-label="删除">×</button></div></article>`).join(''):empty('这个视图没有待办','快速添加一件事，或切换到其他视图。')}</div>
+  </section>`,'个人待办',`${state.data.todos.filter((item)=>item.status!=='completed').length} 条未完成`);
+}
+
+function calendarPage() {
+  const cells=monthGrid(state.calendarMonth); const selected=state.calendarDate;
+  const events=[...state.data.calendarEvents].filter((item)=>localDateKey(new Date(item.startAt))===selected).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)));
+  const todos=state.data.todos.filter((item)=>item.status!=='completed'&&(item.plannedDate===selected||item.dueDate===selected));
+  const due=dueReminders(state.data.reminders).map((item)=>({...item,displayTitle:reminderTitle(item)}));
+  const monthLabel=new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'long'}).format(new Date(`${state.calendarMonth}-01T12:00:00`));
+  return shell(`<section class="page work-page personal-page"><div class="page-head compact"><div><span class="eyebrow">CALENDAR</span><h3>日历与提醒</h3><p>日历负责查看时间，事项仍分别保存在待办与独立事件中。</p></div><button class="btn primary" data-open="new-event">＋ 新建事件</button></div>
+    ${due.length?`<section class="reminder-center card"><div class="section-head"><div><h4>到期提醒</h4><span>${due.length}</span></div></div>${due.map((item)=>`<div class="reminder-row"><div><b>${esc(item.displayTitle)}</b><small>${dateText(item.remindAt)}</small></div><div class="row-actions"><button class="btn small" data-read-reminder="${esc(item.id)}">知道了</button><button class="btn small" data-ignore-reminder="${esc(item.id)}">忽略</button></div></div>`).join('')}</section>`:''}
+    <div class="calendar-layout"><section class="calendar-card card"><header><button class="icon-btn" data-calendar-shift="-1">←</button><h4>${esc(monthLabel)}</h4><button class="icon-btn" data-calendar-shift="1">→</button></header><div class="calendar-weekdays">${['一','二','三','四','五','六','日'].map((day)=>`<span>${day}</span>`).join('')}</div><div class="calendar-grid">${cells.map((cell)=>{const eventCount=state.data.calendarEvents.filter((item)=>localDateKey(new Date(item.startAt))===cell.date).length;const todoCount=state.data.todos.filter((item)=>item.status!=='completed'&&(item.plannedDate===cell.date||item.dueDate===cell.date)).length;return `<button class="calendar-day ${cell.inMonth?'':'muted'} ${cell.date===selected?'active':''} ${cell.date===localDateKey()?'today':''}" data-calendar-date="${cell.date}"><b>${Number(cell.date.slice(-2))}</b>${eventCount+todoCount?`<span>${eventCount+todoCount}</span>`:''}</button>`;}).join('')}</div></section>
+      <section class="agenda-panel card"><div class="section-head"><div><h4>${shortDateText(selected)}</h4><span>${events.length+todos.length}</span></div><button class="btn small" data-open="new-event">＋ 事件</button></div>${events.map((item)=>`<article class="agenda-item"><i></i><div><b>${esc(item.title)}</b><p>${new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(new Date(item.startAt))}${item.notes?` · ${esc(item.notes)}`:''}</p></div><button class="btn small" data-edit-event="${esc(item.id)}">编辑</button></article>`).join('')}${todos.map((item)=>`<article class="agenda-item todo"><i></i><div><b>${esc(item.title)}</b><p>个人待办${item.dueDate===selected?' · 今天截止':''}</p></div><button class="btn small" data-nav="todos">查看</button></article>`).join('')}${events.length+todos.length?'':empty('这一天没有安排','选择其他日期或新建日历事件。')}</section></div>
+  </section>`,'日历提醒',`${due.length} 条到期提醒`);
+}
+
+function templatePage() {
+  const categories=[...new Set([...TEMPLATE_DEFAULT_CATEGORIES,...state.data.templates.map((item)=>item.category).filter(Boolean)])];
+  const query=state.templateSearch.trim().toLowerCase();
+  const templates=[...state.data.templates].filter((item)=>(!query||`${item.title} ${item.content} ${item.category}`.toLowerCase().includes(query))&&(state.templateCategory==='All'||item.category===state.templateCategory)&&(!state.templateFavorites||item.favorite)).sort((a,b)=>Number(b.favorite)-Number(a.favorite)||String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  const current=state.data.templates.find((item)=>item.id===state.templateId)||templates[0];
+  if(current&&state.templateId!==current.id){state.templateId=current.id;state.templateValues={};}
+  const variables=current?extractTemplateVariables(current.content):[];
+  const preview=current?fillTemplate(current.content,state.templateValues):'';
+  return shell(`<section class="page work-page personal-page template-page"><div class="page-head compact"><div><span class="eyebrow">TEMPLATE LIBRARY</span><h3>模板中心</h3><p>模板仅保存在当前浏览器，可通过 TaskFlow JSON 备份迁移。</p></div><button class="btn primary" data-open="new-template">＋ 新建模板</button></div>
+    <div class="template-toolbar card"><div class="search"><span>⌕</span><input id="template-search" class="input" type="search" value="${esc(state.templateSearch)}" placeholder="搜索标题、正文或分类"></div><select class="select" id="template-category"><option value="All">全部分类</option>${categories.map((item)=>`<option ${state.templateCategory===item?'selected':''}>${esc(item)}</option>`).join('')}</select><label class="check-line"><input id="template-favorites" type="checkbox" ${state.templateFavorites?'checked':''}> 只看收藏</label></div>
+    <div class="template-workspace"><aside class="template-list card">${templates.length?templates.map((item)=>`<button class="template-list-item ${current?.id===item.id?'active':''}" data-select-template="${esc(item.id)}"><span>${item.favorite?'★':'☆'}</span><div><b>${esc(item.title)}</b><small>${esc(item.category||'未分类')} · ${dateText(item.updatedAt)}</small></div></button>`).join(''):empty('没有匹配的模板','新建模板或调整筛选条件。')}</aside>
+      <section class="template-detail card">${current?`<header><div><span class="home-card-kicker">${esc(current.category||'未分类')}</span><h4>${esc(current.title)}</h4></div><div class="row-actions"><button class="icon-btn" data-favorite-template="${esc(current.id)}" aria-label="收藏">${current.favorite?'★':'☆'}</button><button class="btn small" data-edit-template="${esc(current.id)}">编辑</button><button class="icon-btn danger" data-delete-template="${esc(current.id)}" aria-label="删除">×</button></div></header>${variables.length?`<div class="template-variables">${variables.map((name)=>`<label>${esc(name)}<input class="input" data-template-variable="${esc(name)}" value="${esc(state.templateValues[name]||'')}" placeholder="留空则保留 {{${esc(name)}}}"></label>`).join('')}</div>`:''}<pre id="template-preview">${esc(preview)}</pre><button class="btn primary" data-copy-template="${esc(current.id)}">复制${variables.length?'填充后':''}模板</button>`:empty('选择一个模板','从左侧选择或新建模板。')}</section></div>
+  </section>`,'模板中心',`${state.data.templates.length} 个本地模板`);
 }
 
 function playgroundPage() {
@@ -640,7 +733,7 @@ function settingsPage() {
   const radarConfigured = Boolean(radarKeys.deepseekApiKey);
   return shell(`<section class="page work-page settings-page"><div class="page-head"><div><h3>Settings</h3><p>存储状态、团队和备份。</p></div></div>
     <div class="settings-grid"><article class="card setting-card"><h4>TaskFlow 服务状态</h4><p class="subtle">任务存储与 Notes 存储相互独立。</p><div class="setting-row"><span>Task Storage</span><span class="setting-value ready">Local</span></div><div class="setting-row"><span>Remote Adapter</span><span class="setting-value muted">Not Configured</span></div><div class="setting-row"><span>Email Notification</span><span class="setting-value muted">Not Configured</span></div></article>
-      <article class="card setting-card"><h4>数据备份</h4><p class="subtle">覆盖本地 Tasks、Notes、Radar Profiles / Batches、Team 及历史记录。导入采用合并策略，相同 ID 保留已有记录；Memos 远端笔记和访问令牌不会导出。历史备份中的已退役数据仅保留结构兼容，不再显示或迁移。</p><div class="import-box"><button class="btn dark" id="export-data">导出本地 JSON</button><label class="btn" for="import-data">导入 JSON</label><input class="sr-only" id="import-data" type="file" accept="application/json,.json"></div><div class="warning" style="margin-top:18px">浏览器存储不是云端备份。file:// 数据可能按浏览器与文件路径隔离，清除站点数据仍会导致丢失。</div></article>
+      <article class="card setting-card"><h4>数据备份</h4><p class="subtle">覆盖本地 Tasks、Notes、Radar、临时暂存、个人待办、日历事件、模板、提醒、Team 及历史记录。导入采用按 ID 合并策略，相同 ID 保留已有记录；过期的已完成暂存不会恢复。Memos 远端笔记和访问令牌不会导出。</p><div class="import-box"><button class="btn dark" id="export-data">导出本地 JSON</button><label class="btn" for="import-data">导入 JSON</label><input class="sr-only" id="import-data" type="file" accept="application/json,.json"></div><div class="warning" style="margin-top:18px">浏览器存储不是云端备份。模板只保存在本地；file:// 数据可能按浏览器与文件路径隔离，清除站点数据仍会导致丢失。</div></article>
       <article class="card setting-card notes-storage-card"><h4>Notes Storage</h4><div class="setting-row"><span>当前模式</span><span class="setting-value ${config.mode === 'Memos' ? 'remote' : 'ready'}">${esc(config.mode || 'Local')}</span></div>
         <div class="field"><label>Memos Server URL</label><input class="input" id="memos-url" type="url" placeholder="https://memos.example.com" value="${esc(config.serverUrl || '')}"><div class="field-hint">可粘贴设置页链接；连接时会自动提取站点根地址，不会把页面路径或 #fragment 当成 API 路径。</div></div>
         <div class="field"><label>API 版本</label><select class="select" id="memos-api"><option value="auto">自动检测</option><option value="/api" ${config.apiBase === '/api' ? 'selected':''}>26.10 / Latest（/api）</option><option value="/api/v1" ${config.apiBase === '/api/v1' ? 'selected':''}>0.30–0.31（/api/v1）</option></select></div>
@@ -662,7 +755,7 @@ function settingsPage() {
         <div class="warning">密码框中的黑点表示当前会话或本设备已有密钥。未勾选长期保存时，密钥只保留到当前页面会话结束；长期保存会增加共享设备、同源脚本与 XSS 风险。密钥不会进入 URL、TaskFlow JSON 备份或服务端持久化数据。</div>
       </article>
       ${teamSettings()}
-      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">TaskFlow 继续通过既有 Storage Adapter 访问本地数据，Remote Adapter 预留未删除。Notes 使用独立的 LocalNotesAdapter / MemosNotesAdapter；Radar 未配置凭证时使用 Demo Provider，配置后由同源 FastAPI 服务调用 Tavily 与 DeepSeek。通知接口仍仅定义 TaskCreated 与 TaskHandedOff，未配置时不模拟发送。</p></article>
+      <article class="card setting-card"><h4>接口边界</h4><p class="subtle">TaskFlow 继续通过既有 Storage Adapter 访问本地数据，Remote Adapter 预留未删除。临时暂存、个人待办、日历、提醒和模板均为独立本地集合；Notes 使用独立的 LocalNotesAdapter / MemosNotesAdapter；Radar 可使用同源 FastAPI。邮件模块与可靠后台提醒本次均未实现，页面关闭时不会声称已发送通知。</p></article>
     </div></section>`, 'Settings', 'TaskFlow 与 Notes 存储独立配置');
 }
 
@@ -685,6 +778,10 @@ function renderDrawer() {
   if (!state.drawer) return '';
   const d = state.drawer;
   let title = '', body = '', submit = '';
+  if (d.type === 'new-capture' || d.type === 'edit-capture') { const item=state.data.captures.find((entry)=>entry.id===d.id); title=d.type==='new-capture'?'快速暂存':'编辑暂存'; submit='保存'; body=`<div class="field"><label>内容 <span>*</span></label><textarea class="textarea tall" name="content" required autofocus placeholder="文本或链接均可">${esc(item?.content||'')}</textarea></div><p class="field-hint">这里不要求标题和分类。需要安排时间时，可稍后将它转为个人待办。</p>`; }
+  if (d.type === 'new-todo' || d.type === 'edit-todo') { const item=state.data.todos.find((entry)=>entry.id===d.id); title=d.type==='new-todo'?'新建个人待办':'编辑个人待办'; submit='保存待办'; body=`<div class="field"><label>事项 <span>*</span></label><input class="input" name="title" maxlength="160" required value="${esc(item?.title||'')}"></div><div class="field"><label>备注</label><textarea class="textarea" name="notes">${esc(item?.notes||'')}</textarea></div><div class="two-col"><div class="field"><label>计划日期</label><input class="input" type="date" name="plannedDate" value="${esc(item?.plannedDate||'')}"></div><div class="field"><label>截止日期</label><input class="input" type="date" name="dueDate" value="${esc(item?.dueDate||'')}"></div></div><div class="field"><label>提醒时间</label><input class="input" type="datetime-local" name="remindAt" value="${esc(dateTimeLocalValue(item?.remindAt))}"><div class="field-hint">网页关闭时不会后台运行；重新打开后，已到期提醒会出现在提醒中心。</div></div>`; }
+  if (d.type === 'new-event' || d.type === 'edit-event') { const item=state.data.calendarEvents.find((entry)=>entry.id===d.id); const start=item?.startAt||`${state.calendarDate}T09:00`; const end=item?.endAt||`${state.calendarDate}T10:00`; title=d.type==='new-event'?'新建日历事件':'编辑日历事件'; submit='保存事件'; body=`<div class="field"><label>标题 <span>*</span></label><input class="input" name="title" maxlength="160" required value="${esc(item?.title||'')}"></div><div class="two-col"><div class="field"><label>开始 <span>*</span></label><input class="input" type="datetime-local" name="startAt" required value="${esc(dateTimeLocalValue(start)||start)}"></div><div class="field"><label>结束 <span>*</span></label><input class="input" type="datetime-local" name="endAt" required value="${esc(dateTimeLocalValue(end)||end)}"></div></div><div class="field"><label>提醒时间</label><input class="input" type="datetime-local" name="remindAt" value="${esc(dateTimeLocalValue(item?.remindAt))}"></div><div class="field"><label>备注</label><textarea class="textarea" name="notes">${esc(item?.notes||'')}</textarea></div>${item?`<button class="btn danger" type="button" data-delete-event="${esc(item.id)}">删除事件</button>`:''}`; }
+  if (d.type === 'new-template' || d.type === 'edit-template') { const item=state.data.templates.find((entry)=>entry.id===d.id); const categories=[...new Set([...TEMPLATE_DEFAULT_CATEGORIES,...state.data.templates.map((entry)=>entry.category).filter(Boolean)])]; title=d.type==='new-template'?'新建模板':'编辑模板'; submit='保存模板'; body=`<div class="field"><label>标题 <span>*</span></label><input class="input" name="title" maxlength="120" required value="${esc(item?.title||'')}"></div><div class="field"><label>分类</label><input class="input" name="category" list="template-category-options" value="${esc(item?.category||TEMPLATE_DEFAULT_CATEGORIES[0])}"><datalist id="template-category-options">${categories.map((value)=>`<option value="${esc(value)}"></option>`).join('')}</datalist></div><div class="field"><label>模板正文 <span>*</span></label><textarea class="textarea tall" name="content" required placeholder="可使用 {{name}} 形式的变量">${esc(item?.content||'')}</textarea></div><label class="check-line"><input type="checkbox" name="favorite" ${item?.favorite?'checked':''}> 收藏模板</label>`; }
   if (d.type === 'new-task') { title='新建任务'; submit='创建任务'; body=`<div class="field"><label>任务名称 <span>*</span></label><input class="input" name="title" required maxlength="120"></div><div class="field"><label>任务要求 <span>*</span></label><textarea class="textarea" name="requirement" required></textarea></div><div class="two-col"><div class="field"><label>负责人</label><select class="select" name="ownerId">${memberOptions()}</select></div><div class="field"><label>任务状态</label><select class="select" disabled><option>待办</option></select></div></div><div class="field"><label>下一步</label><textarea class="textarea" name="next"></textarea></div><div class="field"><label>备注</label><textarea class="textarea" name="remark" placeholder="背景、注意事项或补充说明"></textarea></div>`; }
   if (d.type === 'update-task') { const t=state.data.tasks.find((x)=>x.id===state.taskId); title='更新进度'; submit='保存更新'; body=`<div class="field"><label>本次完成了什么？</label><textarea class="textarea" name="progress" placeholder="填写后会追加到 Activity，不覆盖历史。" autofocus></textarea></div><div class="field"><label>下一步是什么？</label><textarea class="textarea" name="next" placeholder="接下来要做什么？">${esc(t.next||'')}</textarea></div><div class="field"><label>任务状态？</label><select class="select" name="status">${STATUS.map((s)=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}</select></div>`; }
   if (d.type === 'handoff') { const t=state.data.tasks.find((x)=>x.id===state.taskId); const available=state.data.team.some((m)=>!isCurrentOwner(t,m)); title='交接任务'; submit='确认交接'; body=`<div class="handoff-flow"><div class="active"><b>1</b><span>当前负责人</span></div><i>↓</i><div><b>2</b><span>接手人</span></div><i>↓</i><div><b>3</b><span>确认交接</span></div></div><div class="field"><label>当前负责人</label><input class="input" value="${esc(t.ownerName||'未分配')}" disabled></div><div class="field"><label>接手人 <span>*</span></label><select class="select" name="toId" id="handoff-to" required ${available?'':'disabled'}>${handoffMemberOptions(t)}</select>${available?'':'<div class="field-hint error-text">Team 中没有其他可接手的成员，请先到 Settings 添加成员。</div>'}</div><div class="field"><label>交接说明</label><textarea class="textarea" name="note" placeholder="交接背景、注意事项或待处理内容"></textarea></div><div class="handoff-confirm" id="handoff-confirm">请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。</div>`; }
@@ -699,6 +796,10 @@ function render() {
   stopHomeClock();
   destroyActiveArtwork();
   if (state.route === 'home') app.innerHTML = homePage();
+  if (state.route === 'capture') app.innerHTML = capturePage();
+  if (state.route === 'todos') app.innerHTML = todosPage();
+  if (state.route === 'calendar') app.innerHTML = calendarPage();
+  if (state.route === 'templates') app.innerHTML = templatePage();
   if (state.route === 'radar') app.innerHTML = radarPage();
   if (state.route === 'tasks') app.innerHTML = taskList();
   if (state.route === 'task-detail') app.innerHTML = taskDetail();
@@ -740,6 +841,26 @@ async function updateClassificationReferences(kind, sourceId, targetId, targetLa
 
 async function onSubmit(form) {
   const fd = new FormData(form); const d = state.drawer; const timestamp = now();
+  if (d.type === 'new-capture' || d.type === 'edit-capture') {
+    const old=state.data.captures.find((item)=>item.id===d.id); const content=String(fd.get('content')||'').trim();
+    if(!content)throw new Error('暂存内容不能为空');
+    await storage.put('captures',{id:old?.id||uid('capture'),content,status:old?.status||'pending',convertedTodoId:old?.convertedTodoId||'',createdAt:old?.createdAt||timestamp,updatedAt:timestamp,completedAt:old?.completedAt||''}); state.drawer=null; await refresh(old?'暂存内容已更新':'已保存到临时暂存');
+  }
+  if (d.type === 'new-todo' || d.type === 'edit-todo') {
+    const old=state.data.todos.find((item)=>item.id===d.id); const remindValue=String(fd.get('remindAt')||'');
+    const item={id:old?.id||uid('todo'),title:String(fd.get('title')||'').trim(),notes:String(fd.get('notes')||'').trim(),plannedDate:String(fd.get('plannedDate')||''),dueDate:String(fd.get('dueDate')||''),remindAt:remindValue?new Date(remindValue).toISOString():'',status:old?.status||'pending',sourceCaptureId:old?.sourceCaptureId||'',createdAt:old?.createdAt||timestamp,updatedAt:timestamp,completedAt:old?.completedAt||''};
+    if(!item.title)throw new Error('待办内容不能为空'); await storage.put('todos',item); await syncReminder('todo',item,item.status==='completed'?'':item.remindAt); state.drawer=null; await refresh(old?'待办已更新':'个人待办已创建');
+  }
+  if (d.type === 'new-event' || d.type === 'edit-event') {
+    const old=state.data.calendarEvents.find((item)=>item.id===d.id); const startAt=new Date(String(fd.get('startAt'))); const endAt=new Date(String(fd.get('endAt'))); const remindValue=String(fd.get('remindAt')||'');
+    if(Number.isNaN(startAt.getTime())||Number.isNaN(endAt.getTime()))throw new Error('请填写有效的开始和结束时间'); if(endAt<startAt)throw new Error('结束时间不能早于开始时间');
+    const item={id:old?.id||uid('event'),title:String(fd.get('title')||'').trim(),notes:String(fd.get('notes')||'').trim(),startAt:startAt.toISOString(),endAt:endAt.toISOString(),remindAt:remindValue?new Date(remindValue).toISOString():'',createdAt:old?.createdAt||timestamp,updatedAt:timestamp};
+    if(!item.title)throw new Error('事件标题不能为空'); await storage.put('calendarEvents',item); await syncReminder('event',item,item.remindAt); state.calendarDate=localDateKey(startAt); state.calendarMonth=state.calendarDate.slice(0,7); state.drawer=null; await refresh(old?'日历事件已更新':'日历事件已创建');
+  }
+  if (d.type === 'new-template' || d.type === 'edit-template') {
+    const old=state.data.templates.find((item)=>item.id===d.id); const item={id:old?.id||uid('template'),title:String(fd.get('title')||'').trim(),category:String(fd.get('category')||'').trim()||'通用',content:String(fd.get('content')||''),favorite:fd.get('favorite')==='on',createdAt:old?.createdAt||timestamp,updatedAt:timestamp};
+    if(!item.title||!item.content.trim())throw new Error('模板标题和正文不能为空'); await storage.put('templates',item); state.templateId=item.id; state.templateValues={}; state.drawer=null; await refresh(old?'模板已更新':'模板已创建');
+  }
   if (d.type === 'new-task') {
     const owner = state.data.team.find((m) => m.id === fd.get('ownerId'));
     const task = { id:uid('task'), title:fd.get('title').trim(), requirement:fd.get('requirement').trim(), ownerId:owner?.id||'', ownerName:owner?.name||'', delivery:'', next:fd.get('next').trim(), status:'Todo', remark:fd.get('remark').trim(), blockedReason:'', createdAt:timestamp, updatedAt:timestamp };
@@ -970,6 +1091,26 @@ app.addEventListener('click', async (e) => {
   const retryArtwork=e.target.closest('[data-playground-retry]'); if(retryArtwork){mountArtwork(retryArtwork.dataset.playgroundRetry);return;}
   const open=e.target.closest('[data-open]'); if(open){openDrawer(open.dataset.open,open.dataset.open==='edit-radar-profile'?state.radarProfileId:null); return;}
   if(e.target.closest('[data-close]') || (e.target.classList.contains('drawer-backdrop'))){closeDrawer();return;}
+  const editCapture=e.target.closest('[data-edit-capture]'); if(editCapture){openDrawer('edit-capture',editCapture.dataset.editCapture);return;}
+  const completeCapture=e.target.closest('[data-complete-capture]'); if(completeCapture){const item=state.data.captures.find((entry)=>entry.id===completeCapture.dataset.completeCapture);if(item){const timestamp=now();await storage.put('captures',{...item,status:'completed',completedAt:timestamp,updatedAt:timestamp});await refresh();toast('暂存已完成，24 小时后自动清理','',{label:'撤销',dataset:{undoCapture:item.id}});}return;}
+  const undoCapture=e.target.closest('[data-undo-capture]'); if(undoCapture){const item=state.data.captures.find((entry)=>entry.id===undoCapture.dataset.undoCapture);if(item){await storage.put('captures',{...item,status:'pending',completedAt:'',updatedAt:now()});await refresh('已恢复为待处理');}return;}
+  const convertCapture=e.target.closest('[data-convert-capture]'); if(convertCapture){const capture=state.data.captures.find((item)=>item.id===convertCapture.dataset.convertCapture);if(!capture)return;const todoId=`todo_from_${capture.id}`;const existing=state.data.todos.find((item)=>item.id===todoId||item.sourceCaptureId===capture.id);if(!existing){const timestamp=now();await storage.put('todos',{id:todoId,title:capture.content.split(/\n/)[0].slice(0,160),notes:capture.content.includes('\n')?capture.content.split(/\n/).slice(1).join('\n'):'',plannedDate:'',dueDate:'',remindAt:'',status:'pending',sourceCaptureId:capture.id,createdAt:timestamp,updatedAt:timestamp,completedAt:''});}await storage.put('captures',{...capture,status:'completed',convertedTodoId:existing?.id||todoId,completedAt:now(),updatedAt:now()});await refresh(existing?'该暂存已关联到已有待办':'已转为个人待办');return;}
+  const deleteCapture=e.target.closest('[data-delete-capture]'); if(deleteCapture&&confirm('确定永久删除这条暂存吗？')){await storage.delete('captures',deleteCapture.dataset.deleteCapture);await refresh('暂存已删除');return;}
+  const todoView=e.target.closest('[data-todo-view]'); if(todoView){state.todoView=todoView.dataset.todoView;render();return;}
+  const toggleTodo=e.target.closest('[data-toggle-todo]'); if(toggleTodo){const item=state.data.todos.find((entry)=>entry.id===toggleTodo.dataset.toggleTodo);if(item){const completed=item.status!=='completed';const updated={...item,status:completed?'completed':'pending',completedAt:completed?now():'',updatedAt:now()};await storage.put('todos',updated);await syncReminder('todo',updated,completed?'':updated.remindAt);await refresh(completed?'待办已完成':'待办已恢复');}return;}
+  const editTodo=e.target.closest('[data-edit-todo]'); if(editTodo){openDrawer('edit-todo',editTodo.dataset.editTodo);return;}
+  const postponeTodo=e.target.closest('[data-postpone-todo]'); if(postponeTodo){const item=state.data.todos.find((entry)=>entry.id===postponeTodo.dataset.postponeTodo);if(item){await storage.put('todos',{...item,plannedDate:shiftDate(item.plannedDate,1),updatedAt:now()});await refresh('计划日期已顺延一天');}return;}
+  const deleteTodo=e.target.closest('[data-delete-todo]'); if(deleteTodo&&confirm('确定删除这条个人待办吗？关联提醒也会删除。')){await storage.delete('todos',deleteTodo.dataset.deleteTodo);await storage.delete('reminders',reminderId('todo',deleteTodo.dataset.deleteTodo));await refresh('个人待办及关联提醒已删除');return;}
+  const calendarShift=e.target.closest('[data-calendar-shift]'); if(calendarShift){const base=new Date(`${state.calendarMonth}-01T12:00:00`);base.setMonth(base.getMonth()+Number(calendarShift.dataset.calendarShift));state.calendarMonth=localDateKey(base).slice(0,7);state.calendarDate=`${state.calendarMonth}-01`;render();return;}
+  const calendarDate=e.target.closest('[data-calendar-date]'); if(calendarDate){state.calendarDate=calendarDate.dataset.calendarDate;state.calendarMonth=state.calendarDate.slice(0,7);render();return;}
+  const editEvent=e.target.closest('[data-edit-event]'); if(editEvent){openDrawer('edit-event',editEvent.dataset.editEvent);return;}
+  const deleteEvent=e.target.closest('[data-delete-event]'); if(deleteEvent&&confirm('确定删除这个日历事件吗？关联提醒也会删除。')){await storage.delete('calendarEvents',deleteEvent.dataset.deleteEvent);await storage.delete('reminders',reminderId('event',deleteEvent.dataset.deleteEvent));state.drawer=null;await refresh('日历事件及关联提醒已删除');return;}
+  const reminderAction=e.target.closest('[data-read-reminder],[data-ignore-reminder]'); if(reminderAction){const id=reminderAction.dataset.readReminder||reminderAction.dataset.ignoreReminder;const item=state.data.reminders.find((entry)=>entry.id===id);if(item){await storage.put('reminders',{...item,status:reminderAction.dataset.readReminder?'read':'ignored',updatedAt:now()});await refresh('提醒已处理');}return;}
+  const selectTemplate=e.target.closest('[data-select-template]'); if(selectTemplate){state.templateId=selectTemplate.dataset.selectTemplate;state.templateValues={};render();return;}
+  const editTemplate=e.target.closest('[data-edit-template]'); if(editTemplate){openDrawer('edit-template',editTemplate.dataset.editTemplate);return;}
+  const favoriteTemplate=e.target.closest('[data-favorite-template]'); if(favoriteTemplate){const item=state.data.templates.find((entry)=>entry.id===favoriteTemplate.dataset.favoriteTemplate);if(item){await storage.put('templates',{...item,favorite:!item.favorite,updatedAt:now()});await refresh(item.favorite?'已取消收藏':'已收藏模板');}return;}
+  const deleteTemplate=e.target.closest('[data-delete-template]'); if(deleteTemplate&&confirm('确定删除这个模板吗？')){await storage.delete('templates',deleteTemplate.dataset.deleteTemplate);state.templateId=null;state.templateValues={};await refresh('模板已删除');return;}
+  const copyTemplate=e.target.closest('[data-copy-template]'); if(copyTemplate){const item=state.data.templates.find((entry)=>entry.id===copyTemplate.dataset.copyTemplate);if(item){await copyText(fillTemplate(item.content,state.templateValues));toast('模板内容已复制');}return;}
   const newNote=e.target.closest('[data-new-note]'); if(newNote){await startNewNote();return;}
   const newPrompt=e.target.closest('[data-new-prompt]'); if(newPrompt){await startNewNote({contentType:'prompt'});return;}
   const selectNote=e.target.closest('[data-select-note]'); if(selectNote){await openNoteEditor(selectNote.dataset.selectNote);return;}
@@ -1009,18 +1150,29 @@ app.addEventListener('click', async (e) => {
   } catch(error) { toast(error.message || '操作失败','error'); }
 });
 
-app.addEventListener('submit', async (e) => { if(e.target.id==='drawer-form'||e.target.id==='note-editor-form'){e.preventDefault();try{if(e.target.id==='drawer-form')await onSubmit(e.target);else await saveNoteForm(e.target);}catch(error){toast(error.message || '保存失败','error');}} });
+app.addEventListener('submit', async (e) => {
+  if(!['drawer-form','note-editor-form','capture-form','home-capture-form','todo-quick-form'].includes(e.target.id))return;
+  e.preventDefault();
+  try {
+    if(e.target.id==='drawer-form')await onSubmit(e.target);
+    else if(e.target.id==='note-editor-form')await saveNoteForm(e.target);
+    else if(['capture-form','home-capture-form'].includes(e.target.id)){const content=String(new FormData(e.target).get('content')||'').trim();if(!content)throw new Error('暂存内容不能为空');const timestamp=now();await storage.put('captures',{id:uid('capture'),content,status:'pending',convertedTodoId:'',createdAt:timestamp,updatedAt:timestamp,completedAt:''});e.target.reset();await refresh('已保存到临时暂存');}
+    else {const title=String(new FormData(e.target).get('title')||'').trim();if(!title)throw new Error('待办内容不能为空');const timestamp=now();await storage.put('todos',{id:uid('todo'),title,notes:'',plannedDate:'',dueDate:'',remindAt:'',status:'pending',sourceCaptureId:'',createdAt:timestamp,updatedAt:timestamp,completedAt:''});e.target.reset();await refresh('个人待办已添加');}
+  } catch(error){toast(error.message || '保存失败','error');}
+});
 function applySearchInput(input) {
   if(input.id==='category-search'){state.categorySearch=input.value;state.categoryExpandedId=null;render();const next=document.querySelector('#category-search');next?.focus();next?.setSelectionRange(next.value.length,next.value.length);return true;}
   if(['task-search','note-search'].includes(input.id)){state.search=input.value;render();const next=document.querySelector(`#${input.id}`);next?.focus();next?.setSelectionRange(next.value.length,next.value.length);return true;}
+  if(input.id==='template-search'){state.templateSearch=input.value;render();const next=document.querySelector('#template-search');next?.focus();next?.setSelectionRange(next.value.length,next.value.length);return true;}
   return false;
 }
-app.addEventListener('compositionstart',(e)=>{if(['category-search','task-search','note-search'].includes(e.target.id))composingSearches.add(e.target.id);});
+app.addEventListener('compositionstart',(e)=>{if(['category-search','task-search','note-search','template-search'].includes(e.target.id))composingSearches.add(e.target.id);});
 app.addEventListener('compositionend',(e)=>{if(composingSearches.delete(e.target.id))applySearchInput(e.target);});
 app.addEventListener('input', (e) => {
   const editor=e.target.closest('#note-editor-form'); if(editor){scheduleNoteDraft(editor);return;}
   if(composingSearches.has(e.target.id)||e.isComposing)return;
   if(applySearchInput(e.target))return;
+  if(e.target.matches('[data-template-variable]')){state.templateValues[e.target.dataset.templateVariable]=e.target.value;const template=state.data.templates.find((item)=>item.id===state.templateId);const preview=document.querySelector('#template-preview');if(template&&preview)preview.textContent=fillTemplate(template.content,state.templateValues);return;}
   if(['tavily-key','deepseek-key'].includes(e.target.id)) {
     radarCredentials.rememberSessionDraft({
       tavilyApiKey:document.querySelector('#tavily-key')?.value,
@@ -1032,6 +1184,8 @@ app.addEventListener('input', (e) => {
 app.addEventListener('change', async (e) => {
   const editor=e.target.closest('#note-editor-form'); if(editor){scheduleNoteDraft(editor);return;}
   if(e.target.id==='status-filter'){state.status=e.target.value;render();}
+  if(e.target.id==='template-category'){state.templateCategory=e.target.value;state.templateId=null;state.templateValues={};render();}
+  if(e.target.id==='template-favorites'){state.templateFavorites=e.target.checked;state.templateId=null;state.templateValues={};render();}
   if(e.target.id==='note-category-filter'){await flushNoteDraft();state.selectedCategory=e.target.value;state.noteId=null;state.noteDraft=null;persistNotesUi(true);render();}
   if(e.target.id==='radar-profile-select'){selectRadarProfile(e.target.value);render();}
   if(e.target.id==='remember-radar-keys'&&!e.target.checked){radarCredentials.useSessionOnly();toast('已清除长期保存的 Radar 密钥；当前会话仍可继续使用');}
@@ -1039,11 +1193,12 @@ app.addEventListener('change', async (e) => {
   if(e.target.id==='import-data' && e.target.files[0]) await importData(e.target.files[0]);
 });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});
+document.querySelector('#toast-region').addEventListener('click',async(e)=>{const button=e.target.closest('[data-undo-capture]');if(!button)return;try{const item=await storage.get('captures',button.dataset.undoCapture);if(item){await storage.put('captures',{...item,status:'pending',completedAt:'',updatedAt:now()});button.closest('.toast')?.remove();await refresh('已恢复为待处理');}}catch(error){toast(error.message||'撤销失败','error');}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&state.route==='notes')flushNoteDraft().catch(()=>{});});
-window.addEventListener('beforeunload',()=>{persistNotesUi(state.route==='notes');destroyActiveArtwork();});
+window.addEventListener('beforeunload',()=>{persistNotesUi(state.route==='notes');destroyActiveArtwork();if(captureCleanupTimer)clearInterval(captureCleanupTimer);});
 
 loadData()
-  .then(() => { appLoaded=true; render(); })
+  .then(() => { appLoaded=true; render(); captureCleanupTimer=setInterval(async()=>{const removed=await storage.deleteWhere('captures',(item)=>isExpiredCapture(item));if(removed){state.data.captures=state.data.captures.filter((item)=>!isExpiredCapture(item));if(['home','capture'].includes(state.route))render();}},60000); })
   .catch((error) => {
     app.innerHTML = `<div class="empty"><h2>无法打开本地数据库</h2><p>${esc(error.message)}</p></div>`;
   });
