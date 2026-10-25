@@ -228,27 +228,31 @@ function shell(content, title, subtitle) {
   return `<div class="app-shell${homeClass}${playgroundClass}">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div><div><h1>Toward the Sea</h1><small>个人工作台</small></div></div>
-      <div class="nav-kicker">工作空间</div>
-      <nav class="nav-list" aria-label="主导航">
-        ${navButton('home','⌂','首页')}
-        <div class="nav-accordion ${personalOpen?'open':''}">
-          <button class="nav-btn nav-group-toggle ${personalActive?'group-active':''}" type="button" data-nav-group="personal" aria-expanded="${personalOpen}" aria-controls="personal-nav-submenu"><span class="nav-icon">◫</span><span>个人管理</span><i class="nav-caret" aria-hidden="true">⌄</i></button>
-          <div class="nav-submenu-shell" id="personal-nav-submenu" aria-hidden="${!personalOpen}"><div class="nav-submenu">
-            ${navButton('capture','＋','临时暂存',{child:true,disabled:!personalOpen})}
-            ${navButton('todos','✓','个人待办',{child:true,disabled:!personalOpen})}
-            ${navButton('calendar','□','日历提醒',{child:true,disabled:!personalOpen})}
-            ${navButton('templates','▤','模板中心',{child:true,disabled:!personalOpen})}
-          </div></div>
-        </div>
-        <span class="nav-divider">知识与工作</span>
-        ${navButton('radar','⌁','探索雷达')}
-        ${navButton('notes','✎','随手笔记')}
-        ${navButton('categories','◇','内容分类')}
-        ${navButton('tasks','▣','任务管理')}
-        ${navButton('playground','✦','数字艺术')}
-      </nav>
-      <button class="global-capture" type="button" data-open="new-capture">＋ 快速暂存</button>
-      <div class="local-note"><span class="storage-dot"></span><div><b>本地优先</b><small>Notes 数据源：${esc(state.notesMode)}</small></div><button class="sidebar-settings" data-nav="settings" aria-label="打开设置">⚙</button></div>
+      <div class="sidebar-navigation">
+        <div class="nav-kicker">工作空间</div>
+        <nav class="nav-list" aria-label="主导航">
+          ${navButton('home','⌂','首页')}
+          <div class="nav-accordion ${personalOpen?'open':''}">
+            <button class="nav-btn nav-group-toggle ${personalActive?'group-active':''}" type="button" data-nav-group="personal" aria-expanded="${personalOpen}" aria-controls="personal-nav-submenu"><span class="nav-icon">◫</span><span>个人管理</span><i class="nav-caret" aria-hidden="true">⌄</i></button>
+            <div class="nav-submenu-shell" id="personal-nav-submenu" aria-hidden="${!personalOpen}"><div class="nav-submenu">
+              ${navButton('capture','＋','临时暂存',{child:true,disabled:!personalOpen})}
+              ${navButton('todos','✓','个人待办',{child:true,disabled:!personalOpen})}
+              ${navButton('calendar','□','日历提醒',{child:true,disabled:!personalOpen})}
+              ${navButton('templates','▤','模板中心',{child:true,disabled:!personalOpen})}
+            </div></div>
+          </div>
+          <span class="nav-divider">知识与工作</span>
+          ${navButton('radar','⌁','探索雷达')}
+          ${navButton('notes','✎','随手笔记')}
+          ${navButton('categories','◇','内容分类')}
+          ${navButton('tasks','▣','任务管理')}
+          ${navButton('playground','✦','数字艺术')}
+        </nav>
+      </div>
+      <div class="sidebar-footer">
+        <button class="global-capture" type="button" data-open="new-capture">＋ 快速暂存</button>
+        <div class="local-note"><span class="storage-dot"></span><div><b>本地优先</b><small>Notes 数据源：${esc(state.notesMode)}</small></div><button class="sidebar-settings" data-nav="settings" aria-label="打开设置">⚙</button></div>
+      </div>
     </aside>
     <main class="main"><header class="topbar"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><div class="topbar-state"><span class="status-pulse"></span><span>${['notes','categories'].includes(state.route) ? esc(state.notesMode) : '本地存储'}</span></div></header>${content}</main>
   </div>${renderDrawer()}`;
@@ -1225,6 +1229,7 @@ app.addEventListener('change', async (e) => {
 });
 document.addEventListener('pointerdown',(e)=>pointerActivationGuard.begin(e),true);
 document.addEventListener('pointermove',(e)=>pointerActivationGuard.move(e),true);
+document.addEventListener('pointerup',(e)=>pointerActivationGuard.end(e),true);
 document.addEventListener('pointercancel',()=>pointerActivationGuard.cancel(),true);
 document.addEventListener('click',(e)=>{if(pointerActivationGuard.shouldSuppress(e)){e.preventDefault();e.stopImmediatePropagation();}},true);
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&state.drawer)closeDrawer();});

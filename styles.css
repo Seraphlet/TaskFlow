@@ -21,7 +21,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); text-rendering: 
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 260px 1fr; }
-.sidebar { min-height: 100vh; background: var(--navy); color: white; padding: 24px 20px 18px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar { min-height: 100vh; background: var(--navy); color: white; padding: 24px 20px 18px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; overflow: hidden; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 10px; }
 .brand-mark { width: 40px; height: 40px; display: flex; align-items: flex-end; justify-content: center; gap: 3px; padding: 9px; border-radius: 13px; background: var(--coral); box-shadow: 0 8px 24px rgba(231,101,79,.3); }
 .brand-mark i { width: 4px; border-radius: 4px; background: white; opacity: .95; }
@@ -30,6 +30,7 @@ button { cursor: pointer; }
 .brand-mark i:nth-child(3) { height: 15px; }
 .brand h1 { font-size: 18px; margin: 0; letter-spacing: .01em; }
 .brand small { color: #9cacA6; font-size: 11px; letter-spacing: .04em; }
+.sidebar-navigation { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
 .nav-kicker { margin: 2px 12px -17px; color: #71827c; font-size: 10px; font-weight: 800; letter-spacing: .15em; }
 .nav-list { display: grid; gap: 5px; }
 .nav-btn { position: relative; border: 0; background: transparent; color: #aebdb7; padding: 12px 14px; border-radius: 11px; display: flex; align-items: center; gap: 12px; text-align: left; transition: background .16s ease, color .16s ease, transform .16s ease; }
@@ -51,7 +52,8 @@ button { cursor: pointer; }
 .nav-divider { margin: 8px 12px 2px; color: #71827c; font-size: 10px; font-weight: 800; letter-spacing: .13em; }
 .global-capture { width: 100%; min-height: 40px; border: 1px solid rgba(255,255,255,.14); border-radius: 11px; color: white; background: rgba(231,101,79,.18); font-weight: 750; }
 .global-capture:hover { background: rgba(231,101,79,.3); }
-.local-note { margin-top: auto; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; color: #9eafa9; font-size: 11px; line-height: 1.45; padding: 14px 12px; border: 1px solid #31433e; border-radius: 13px; background: rgba(255,255,255,.025); }
+.sidebar-footer { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.local-note { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; color: #9eafa9; font-size: 11px; line-height: 1.45; padding: 14px 12px; border: 1px solid #31433e; border-radius: 13px; background: rgba(255,255,255,.025); }
 .local-note b, .local-note small { display: block; }
 .local-note b { color: #e4ebe8; font-size: 12px; }
 .local-note small { color: #82938d; }
@@ -635,6 +637,8 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 @media (max-width: 820px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { min-height: auto; height: auto; padding: 12px 16px; gap: 12px; position: sticky; top: 0; z-index: 10; }
+  .sidebar-navigation { flex: 0 1 auto; min-height: auto; overflow: visible; gap: 12px; }
+  .sidebar-footer { flex: 0 0 auto; }
   .brand small { display: none; }
   .nav-kicker { display: none; }
   .local-note { position: absolute; top: 17px; right: 16px; width: auto; display: block; padding: 0; border: 0; background: transparent; font-size: 0; }

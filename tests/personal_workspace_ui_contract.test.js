@@ -22,6 +22,10 @@ assert(html.includes('interaction-guards.js'),'pointer activation guard loads be
 assert(app.includes('data-nav-group="personal"'),'personal routes are grouped in an accordion');
 assert(app.includes('aria-expanded="${personalOpen}"'),'accordion exposes its expanded state');
 assert(app.includes('confirmEditorExit()'),'navigation and drawer close protect unsaved transient forms');
+assert(app.includes('class="sidebar-navigation"'),'sidebar navigation has an independent scrolling region');
+assert(app.includes('class="sidebar-footer"'),'quick capture and status card share a fixed sidebar footer');
+assert(css.includes('.sidebar-navigation { flex: 1 1 auto; min-height: 0; overflow-y: auto;'),'desktop sidebar navigation consumes and scrolls within remaining height');
+assert(css.includes('.sidebar-footer { flex: 0 0 auto;'),'sidebar footer does not shrink when navigation expands');
 assert(app.includes("document.addEventListener('pointerdown'"),'pointer origin is recorded before delegated clicks');
 assert(css.includes('@media (max-width: 560px)'),'mobile layout remains defined');
 assert(css.includes('.template-workspace'),'template split workspace is styled');
