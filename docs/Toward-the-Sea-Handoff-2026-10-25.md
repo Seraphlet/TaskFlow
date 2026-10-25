@@ -3,7 +3,7 @@
 更新时间：2026-10-25
 仓库：`git@github.com:Seraphlet/TaskFlow.git`
 分支：`main`
-交接基线：`545f16c fix(ui): protect editors and compact navigation`
+功能交接基线：`04f4469 fix(ui): guard drawer drags and anchor sidebar footer`
 
 ## 1. 最重要的迁移提醒
 
@@ -140,7 +140,9 @@ index.html
 - Music、Keyboard、Life Geometry 数字艺术
 - JSON V1–V7 合并导入与完整本地数据导出
 
-左侧“个人管理”是默认折叠的 Accordion，包含暂存、待办、日历和模板；底部“＋ 快速暂存”保持独立。
+左侧“个人管理”是默认折叠的 Accordion，包含暂存、待办、日历和模板。桌面端导航区独立滚动；“＋ 快速暂存”与本地状态卡片组成固定 Footer，不会因子菜单展开而移动。
+
+Drawer 的遮罩关闭使用完整指针手势判断：只有 `pointerdown` 和 `pointerup` 都直接发生在遮罩层，才视为主动点击遮罩。由输入框开始的文字拖选即使在遮罩上松开，也不会关闭编辑器；关闭按钮仍保留未保存内容确认。
 
 ## 7. 本地数据与备份
 
@@ -204,7 +206,9 @@ git diff --check
 
 ## 10. 最近关键提交
 
+- `04f4469`：修复 Drawer 拖选释放到遮罩时意外关闭；固定侧边栏底部操作区
 - `545f16c`：手风琴导航、编辑拖选防误触、Toward the Sea 显示名称
+- `b074ab8`：增加设备迁移与开发交接文档
 - `a5343b0`：个人暂存、待办、日历、提醒和模板中心
 - `8960cdd`：仅标题 Notes 在 Memos 中不再显示为空
 - `725a5c6`：Memos 分类元数据同步
@@ -216,10 +220,15 @@ git diff --check
 - Templates 仅本地保存，不同步 Memos。
 - `file://` 下 Playground 动态模块和远端请求可能受浏览器安全策略限制。
 - Memos 是否能从 `file://` 连接取决于服务器 CORS；正式使用建议 HTTPS 同源部署。
-- 当前开发设备的浏览器自动操作组件无法初始化，因此 `545f16c` 的真实鼠标拖选场景需要人工复验；事件手势模拟、契约和全部回归测试已通过。
-- 手动验收：在 Notes、Quick Capture、To-do、Templates 编辑框中向左拖选并越界释放，不能导航或关闭；正常点击关闭/导航仍应工作，未保存 Drawer 内容应出现确认。
+- 2026-10-25 已使用本机 Edge 桌面视口完成真实 Pointer 事件验收：从 Drawer 文本域按下、拖到遮罩松开后 Drawer 保持打开；取消放弃修改时保持打开；确认后关闭按钮正常关闭。
+- 同次浏览器验收中，“个人管理”展开前后 Footer 顶部位置均为 `591.3125px`；导航区在 `488px` 可视高度内独立承载 `554px` 内容并滚动，Footer 底部保持在 `702px / 720px` 视口内。
+- 后续若调整 Drawer、全局点击委托或侧边栏 Flex 结构，应重新执行 `tests/interaction_guards.test.js`、`tests/personal_workspace_ui_contract.test.js`，并复验上述真实拖选场景。
 
-## 12. 新任务接手建议
+## 12. 当前阶段结论
+
+截至 `04f4469`，本轮 Toward the Sea 功能开发与交互收口已完成，可以作为换设备后的稳定接手基线。后续工作应按新需求增量开展，不要重建项目、重置 IndexedDB 或批量重命名 `taskflow-*` 兼容标识。
+
+## 13. 新任务接手建议
 
 在新设备开始工作时先执行：
 
