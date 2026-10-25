@@ -676,7 +676,7 @@ def recover_unreceived_batch(
     return None
 
 
-app = FastAPI(title="TaskFlow Radar API", version="0.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="Toward the Sea Radar API", version="0.2.0", docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:4173", "http://127.0.0.1:4173", "http://localhost:8788", "http://127.0.0.1:8788"],

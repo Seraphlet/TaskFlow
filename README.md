@@ -1,4 +1,4 @@
-# TaskFlow Workspace V1
+# Toward the Sea V1
 
 一个无构建依赖的本地优先个人工作台，包含 Home、临时暂存、个人待办、日历提醒、模板中心、Radar、Notes、Categories、Tasks 和按需加载的 Playground。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，个人事项、任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
 
@@ -91,9 +91,9 @@ tests/                  凭证安全、模型校验和 API 边界测试
 
 Notes 默认使用 Local。Settings 中可填写自己的 Memos 地址和 Personal Access Token，先执行真实连接测试，再显式 Connect。令牌默认仅保存在当前浏览器会话；只有主动勾选“记住令牌”才会持久化。
 
-支持官方 Memos 26.10 / Latest 的 `/api` 与 0.30–0.31 的 `/api/v1`，并使用 Bearer Token。应用只读取和操作带有 TaskFlow 标记的远端 Memos，不会删除其他来源内容。新版记录把分类稳定 ID 与显示名称等 TaskFlow 信息写在正文末尾的 `taskflow:meta:v1` 注释块中，TaskFlow 编辑和展示时隐藏该块；旧版正文开头的 Base64 标记仍可读取，并会在下次保存时迁移。损坏或重复的新版标记不会被猜测性删除，正文内容、Markdown、普通 HTML 注释和换行会原样保留。
+支持官方 Memos 26.10 / Latest 的 `/api` 与 0.30–0.31 的 `/api/v1`，并使用 Bearer Token。应用只读取和操作由 Toward the Sea 创建的远端 Memos，不会删除其他来源内容。为保持已有数据兼容，记录继续使用 `taskflow:meta:v1` 元数据标记；Toward the Sea 编辑和展示时会隐藏该块。旧版正文开头的 Base64 标记仍可读取，并会在下次保存时迁移。损坏或重复的新版标记不会被猜测性删除，正文内容、Markdown、普通 HTML 注释和换行会原样保留。
 
-仅填写标题的远端 Note 会把标题同时作为 Memos 可见文本，并通过 `titleOnly` 元数据在 TaskFlow 中恢复为“标题有值、正文为空”；后续增加或删除正文时会自动切换，不会重复追加标题。
+仅填写标题的远端 Note 会把标题同时作为 Memos 可见文本，并通过 `titleOnly` 元数据在 Toward the Sea 中恢复为“标题有值、正文为空”；后续增加或删除正文时会自动切换，不会重复追加标题。
 
 分类配置本身保存在当前浏览器。尚未被笔记引用的自定义分类不会跨设备同步；被 Memos 笔记引用后，分类 ID 与名称会随该笔记元数据恢复。删除已有引用的分类时，界面会要求先选择迁移目标。
 
@@ -111,6 +111,6 @@ API Key 默认写入 `sessionStorage`。只有用户主动勾选“长期保存�
 
 Settings 输入的 Radar 密钥会即时保留在当前页面会话中，因此切换应用模块或刷新页面不会要求重复输入；关闭该页面会话后由浏览器清理。已有会话或长期密钥会以密码黑点回填，用户仍可用“显示/隐藏”按钮检查或修改。
 
-密钥只通过同源 POST 请求 Body 发送，不进入 URL、TaskFlow JSON 导入导出、后端数据库、推荐消息或日志。后端仅为调用 Tavily 与 DeepSeek 在请求生命周期内使用明文 Key。浏览器长期存储不能抵御共享设备访问、同源恶意脚本或 XSS，建议只在个人可信设备启用。
+密钥只通过同源 POST 请求 Body 发送，不进入 URL、Toward the Sea JSON 导入导出、后端数据库、推荐消息或日志。后端仅为调用 Tavily 与 DeepSeek 在请求生命周期内使用明文 Key。浏览器长期存储不能抵御共享设备访问、同源恶意脚本或 XSS，建议只在个人可信设备启用。
 
 生产环境建议由 Nginx 将站点以及 `/api/radar/`、`/api/life/` 同源反向代理到 FastAPI，并启用 HTTPS。不要把 FastAPI 数据目录、Git 仓库或其他服务器文件配置为公开静态目录。

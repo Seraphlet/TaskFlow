@@ -28,7 +28,7 @@ class LocalStorageAdapter {
           request.result.onversionchange = () => request.result.close();
           resolve(request.result);
         };
-        request.onblocked = () => reject(new Error('本地数据库升级被其他已打开的 TaskFlow 页面阻塞。请关闭其他 TaskFlow 标签页后刷新当前页面。'));
+        request.onblocked = () => reject(new Error('本地数据库升级被其他已打开的 Toward the Sea 页面阻塞。请关闭其他 Toward the Sea 标签页后刷新当前页面。'));
         request.onerror = () => reject(request.error);
       });
     }

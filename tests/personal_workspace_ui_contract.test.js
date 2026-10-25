@@ -18,6 +18,11 @@ assert(app.includes('dueReminders(state.data.reminders)'),'home/calendar expose 
 assert(app.includes('data-template-variable'),'template variables are rendered');
 assert(app.includes('fillTemplate(item.content,state.templateValues)'),'copy fills a cloned view instead of mutating source');
 assert(html.includes('personal-workspace.js'),'domain helpers load before the app');
+assert(html.includes('interaction-guards.js'),'pointer activation guard loads before the app');
+assert(app.includes('data-nav-group="personal"'),'personal routes are grouped in an accordion');
+assert(app.includes('aria-expanded="${personalOpen}"'),'accordion exposes its expanded state');
+assert(app.includes('confirmEditorExit()'),'navigation and drawer close protect unsaved transient forms');
+assert(app.includes("document.addEventListener('pointerdown'"),'pointer origin is recorded before delegated clicks');
 assert(css.includes('@media (max-width: 560px)'),'mobile layout remains defined');
 assert(css.includes('.template-workspace'),'template split workspace is styled');
 console.log('Personal workspace UI contract tests passed');

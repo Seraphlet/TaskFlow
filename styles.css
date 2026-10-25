@@ -37,6 +37,17 @@ button { cursor: pointer; }
 .nav-btn.active { background: var(--navy-2); color: white; box-shadow: inset 3px 0 var(--coral); }
 .nav-btn.active .nav-icon { color: #ff9a86; }
 .nav-icon { width: 22px; color: #83958e; text-align: center; font-size: 17px; }
+.nav-accordion { display: grid; min-width: 0; }
+.nav-group-toggle { width: 100%; }
+.nav-group-toggle.group-active { color: white; }
+.nav-group-toggle.group-active .nav-icon { color: #ff9a86; }
+.nav-caret { margin-left: auto; color: #83958e; font-style: normal; transition: transform .18s ease; }
+.nav-accordion.open .nav-caret { transform: rotate(180deg); }
+.nav-submenu-shell { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .18s ease, opacity .18s ease; }
+.nav-accordion.open .nav-submenu-shell { grid-template-rows: 1fr; opacity: 1; }
+.nav-submenu { min-height: 0; overflow: hidden; display: grid; gap: 3px; }
+.nav-child { min-height: 36px; padding: 8px 12px 8px 31px; font-size: 13px; }
+.nav-child .nav-icon { width: 17px; font-size: 14px; }
 .nav-divider { margin: 8px 12px 2px; color: #71827c; font-size: 10px; font-weight: 800; letter-spacing: .13em; }
 .global-capture { width: 100%; min-height: 40px; border: 1px solid rgba(255,255,255,.14); border-radius: 11px; color: white; background: rgba(231,101,79,.18); font-weight: 750; }
 .global-capture:hover { background: rgba(231,101,79,.3); }
@@ -633,6 +644,12 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .nav-divider { display: none; }
   .global-capture { display: none; }
   .nav-btn { flex: 0 0 auto; justify-content: center; padding: 9px 12px; }
+  .nav-accordion { flex: 0 0 auto; }
+  .nav-accordion.open { display: flex; align-items: center; }
+  .nav-accordion .nav-group-toggle { width: auto; }
+  .nav-accordion.open .nav-submenu-shell { display: block; }
+  .nav-submenu { display: flex; }
+  .nav-child { padding-left: 12px; }
   .nav-icon { display: none; }
   .topbar { display: none; }
   .page { padding: 28px 20px 44px; }
@@ -753,6 +770,7 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .key-map { width: calc(100% - 20px); overflow-x: auto; justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .nav-submenu-shell, .nav-caret { transition: none; }
   .home-card-interactive, .home-action-list button, .playground-card { transition: none; }
   .home-card-interactive:hover, .home-action-list button:hover, .playground-card:hover { transform: none; }
   .life-event-window.life-event-change { animation: none; }

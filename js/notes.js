@@ -198,10 +198,10 @@
       } while (token);
       return result;
     }
-    async get(id) { const memo = await this.fetch(`${this.apiBase}/${id}`); const note = this.decode(memo); if (!note) throw new Error('该远端 Memo 不属于 TaskFlow Notes 管理范围'); return note; }
+    async get(id) { const memo = await this.fetch(`${this.apiBase}/${id}`); const note = this.decode(memo); if (!note) throw new Error('该远端 Memo 不属于 Toward the Sea Notes 管理范围'); return note; }
     async create(note) { const memo = await this.fetch(`${this.apiBase}/memos`, { method: 'POST', body: JSON.stringify({ content: this.encode(note), visibility: 'PRIVATE' }) }); return this.decode(memo); }
-    async update(note) { if (!String(note.id).startsWith('memos/')) throw new Error('拒绝修改非 TaskFlow 管理的远端 Memo'); const memo = await this.fetch(`${this.apiBase}/${note.id}?updateMask=content`, { method: 'PATCH', body: JSON.stringify({ name: note.id, content: this.encode(note) }) }); return this.decode(memo); }
-    async delete(id) { if (!String(id).startsWith('memos/')) throw new Error('拒绝删除非 TaskFlow 管理的远端 Memo'); await this.fetch(`${this.apiBase}/${id}`, { method: 'DELETE' }); }
+    async update(note) { if (!String(note.id).startsWith('memos/')) throw new Error('拒绝修改非 Toward the Sea 管理的远端 Memo'); const memo = await this.fetch(`${this.apiBase}/${note.id}?updateMask=content`, { method: 'PATCH', body: JSON.stringify({ name: note.id, content: this.encode(note) }) }); return this.decode(memo); }
+    async delete(id) { if (!String(id).startsWith('memos/')) throw new Error('拒绝删除非 Toward the Sea 管理的远端 Memo'); await this.fetch(`${this.apiBase}/${id}`, { method: 'DELETE' }); }
   }
 
   window.TaskFlowNotes = { LocalNotesAdapter, MemosNotesAdapter, NotesCredentialStore, NotesDraftStore };

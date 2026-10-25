@@ -35,7 +35,7 @@ class RadarApiTests(unittest.TestCase):
 
     def test_health_and_static_frontend(self):
         self.assertEqual(self.client.get("/api/radar/health").json()["status"], "ok")
-        self.assertIn("TaskFlow Workspace", self.client.get("/").text)
+        self.assertIn("Toward the Sea", self.client.get("/").text)
         self.assertEqual(self.client.get("/js/app.js").status_code, 200)
 
     def test_home_background_supports_cache_revalidation(self):
