@@ -1028,6 +1028,10 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .overtime-section-head > .btn { margin-left: auto; }
 .labor-form-grid.compact { grid-template-columns: repeat(2,minmax(150px,280px)); }
 .overtime-rate-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.paired-number-field { display: grid; gap: 6px; color: #64748b; font-size: 12px; font-weight: 700; }
+.paired-number-field > div { display: grid; grid-template-columns: minmax(100px,1fr) 108px; align-items: center; gap: 10px; }
+.paired-number-field input[type="range"] { width: 100%; accent-color: #526780; }
+.overtime-rate-controls { align-items: end; }
 .overtime-rate { padding: 11px 13px; border: 1px solid #dce2ea; border-radius: 9px; background: #f9fafc; }
 .overtime-rate.active { border-color: #9fb0c5; background: #eef2f7; box-shadow: inset 3px 0 #526780; }
 .overtime-rate span,.overtime-rate b { display: block; }
@@ -1046,6 +1050,11 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .overtime-chart .overtime-zero-line { stroke: #8793a3; stroke-width: 1; stroke-dasharray: 4 4; }
 .overtime-chart .overtime-current-line { stroke: #526780; stroke-width: 1.5; stroke-dasharray: 3 3; }
 .overtime-current-label { fill: #526780; font-size: 10px; font-weight: 800; }
+.overtime-chart .overtime-view-line { stroke: #7b61a8; stroke-width: 1.5; stroke-dasharray: 2 3; }
+.overtime-view-label { fill: #7b61a8; font-size: 10px; font-weight: 800; }
+.overtime-chart .overtime-settlement-line { stroke: rgba(168,97,0,.55); stroke-width: 1; stroke-dasharray: 2 4; }
+.overtime-hit-point { fill: transparent; stroke: transparent; cursor: pointer; }
+.overtime-hit-point:focus { stroke: #526780; stroke-width: 2; outline: none; }
 .overtime-chart .overtime-optimal { fill: #fff; stroke: #e7654f; stroke-width: 3; }
 .overtime-chart .overtime-crossing { fill: rgba(82,103,128,.08); }
 .overtime-chart .overtime-jump { stroke: #7b61a8; stroke-width: 2; stroke-dasharray: 2 2; }
@@ -1056,6 +1065,30 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .overtime-save-row { display: grid; grid-template-columns: minmax(150px,.35fr) minmax(260px,1fr) auto; align-items: end; gap: 12px; padding-top: 14px; border-top: 1px solid #e2e6ed; }
 .overtime-save-row label { display: grid; gap: 6px; color: #64748b; font-size: 12px; font-weight: 700; }
 .overtime-save-row .textarea { min-height: 76px; }
+.overtime-save-actions { display: grid; gap: 8px; min-width: 170px; }
+.overtime-print-report { display: none; }
+.overtime-view-caption { margin: -3px 0 5px; color: #64748b; font-size: 12px; }
+.overtime-point-detail { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.overtime-point-detail span { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #e2e6ed; border-radius: 8px; color: #64748b; font-size: 11px; background: #fff; }
+.overtime-point-detail b { color: #25364b; font-size: 13px; }
+.overtime-legend-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.overtime-legend-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid #d8dee8; border-radius: 999px; color: #334155; background: #fff; font: inherit; cursor: pointer; }
+.overtime-legend-toggle i { width: 16px; height: 3px; border-radius: 2px; }
+.overtime-legend-toggle.muted { opacity: .46; text-decoration: line-through; }
+.overtime-subjective-chart { padding-top: 4px; }
+.overtime-suggestions { padding: 13px 15px; border: 1px solid #d8dee8; border-radius: 10px; background: #f8fafc; }
+.overtime-suggestions ul { margin: 7px 0 0; padding-left: 20px; color: #526071; }
+.overtime-suggestions li + li { margin-top: 4px; }
+.overtime-status-section { display: grid; gap: 15px; }
+.overtime-status-section form { display: grid; gap: 13px; }
+.overtime-reasons { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 12px; border: 1px solid #d8dee8; border-radius: 9px; }
+.overtime-reasons legend { padding: 0 5px; color: #64748b; font-size: 12px; font-weight: 700; }
+.overtime-reasons label { display: inline-flex; align-items: center; gap: 5px; color: #475569; font-size: 13px; }
+.overtime-status-history { display: grid; gap: 8px; }
+.overtime-status-card { display: grid; grid-template-columns: minmax(180px,.75fr) minmax(220px,1fr) auto; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid #e2e6ed; border-radius: 9px; background: #fff; }
+.overtime-status-card > div:first-child { display: grid; gap: 3px; }
+.overtime-status-card span,.overtime-status-card p { color: #64748b; font-size: 12px; }
+.overtime-status-card p { margin: 0; }
 
 .drawer:not(.route-home):not(.route-playground) { background: rgba(255,255,255,.95); border-left: 1px solid rgba(226,230,237,.9); box-shadow: -22px 0 64px rgba(51,65,85,.17); backdrop-filter: blur(20px) saturate(1.06); }
 .drawer:not(.route-home):not(.route-playground) .btn { min-height: 38px; padding: 8px 13px; border: 1px solid #d5dce6; border-radius: 7px; color: #334155; background: #fff; box-shadow: 0 1px 2px rgba(51,65,85,.04); }
@@ -1099,7 +1132,10 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .radar-workspace.content-sidebar-collapsed,.settings-workspace.content-sidebar-collapsed { grid-template-columns: 0 38px minmax(0,1fr); }
   .overtime-summary { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .overtime-save-row { grid-template-columns: 1fr 1fr; }
-  .overtime-save-row .btn { grid-column: 2; }
+  .overtime-save-row > .btn { grid-column: 2; }
+  .overtime-status-card { grid-template-columns: 1fr auto; }
+  .overtime-status-card > p { grid-column: 1 / -1; }
+  .overtime-point-detail { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 560px) {
   .content-sidebar-layout:not(.content-sidebar-collapsed) { grid-template-columns: 1fr; }
@@ -1109,10 +1145,51 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .drawer-facts div { grid-template-columns: 1fr; gap: 3px; }
   .labor-form-grid.compact,.overtime-rate-grid,.overtime-summary,.overtime-nodes,.overtime-save-row { grid-template-columns: 1fr; }
   .overtime-duration,.overtime-expense-row { grid-template-columns: 1fr; }
+  .paired-number-field > div { grid-template-columns: minmax(90px,1fr) 96px; }
   .overtime-section-head { align-items: flex-start; flex-wrap: wrap; }
   .overtime-section-head > .btn { width: 100%; margin-left: 36px; }
-  .overtime-save-row .btn { grid-column: auto; }
+  .overtime-save-row > .btn { grid-column: auto; }
+  .overtime-status-card { grid-template-columns: 1fr; }
+  .overtime-legend-buttons { justify-content: flex-start; }
+  .overtime-point-detail { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-shell:not(.home-shell):not(.playground-shell),.module-content-sidebar { transition: none; }
+}
+
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+  html,body { width: auto; min-width: 0; height: auto; overflow: visible; background: #fff !important; }
+  body.printing-overtime > *:not(#overtime-print-portal) { display: none !important; }
+  #overtime-print-portal { display: block !important; width: 100%; margin: 0; color: #172033; background: #fff; font: 10pt/1.45 Inter,"Segoe UI","Microsoft YaHei",sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #overtime-print-portal .overtime-interactive-only { display: none !important; }
+  .overtime-print-report > header { padding-bottom: 7mm; border-bottom: 1px solid #cbd5e1; }
+  .overtime-print-report > header span { color: #526780; font-size: 8pt; font-weight: 800; letter-spacing: .12em; }
+  .overtime-print-report h1 { margin: 2mm 0 1mm; font-size: 22pt; line-height: 1.15; }
+  .overtime-print-report h2 { margin: 0 0 3mm; font-size: 12pt; }
+  .overtime-print-report p { margin: 0; }
+  .overtime-print-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; margin-top: 6mm; }
+  .overtime-print-facts > section,.overtime-print-costs,.overtime-print-note { padding: 4mm; border: 1px solid #d8dee8; border-radius: 2mm; break-inside: avoid; }
+  .overtime-print-facts dl { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm 5mm; margin: 0; }
+  .overtime-print-facts dl div { display: grid; gap: 1mm; }
+  .overtime-print-facts dt { color: #64748b; font-size: 8pt; }
+  .overtime-print-facts dd { margin: 0; font-weight: 750; }
+  .overtime-print-costs { margin-top: 5mm; }
+  .overtime-print-costs table { width: 100%; border-collapse: collapse; }
+  .overtime-print-costs th,.overtime-print-costs td { padding: 1.4mm 2mm; border-bottom: 1px solid #e5e7eb; text-align: left; }
+  .overtime-print-costs td { text-align: right; font-variant-numeric: tabular-nums; }
+  .overtime-print-analysis { margin-top: 6mm; }
+  .overtime-print-analysis > h2 { padding-bottom: 2mm; border-bottom: 1px solid #cbd5e1; }
+  .overtime-print-report .labor-live-summary { grid-template-columns: repeat(5,1fr); gap: 2mm; }
+  .overtime-print-report .labor-live-summary > div { min-height: 0; padding: 2.5mm; background: #f5f7fa !important; border: 1px solid #dde3eb; box-shadow: none; }
+  .overtime-print-report .labor-live-summary b { font-size: 11pt; }
+  .overtime-print-report .warning { padding: 2.5mm; }
+  .overtime-print-report .overtime-chart-block { gap: 2mm; padding-top: 4mm; break-inside: avoid; }
+  .overtime-print-report .overtime-chart svg { display: block; width: 100%; height: auto; max-height: 205px; }
+  .overtime-print-report .labor-chart-legend { margin-top: 1mm; font-size: 7.5pt; }
+  .overtime-print-report .overtime-chart-block.compact { break-before: auto; }
+  .overtime-print-report .overtime-nodes { grid-template-columns: repeat(4,1fr); gap: 2mm; break-inside: avoid; }
+  .overtime-print-report .overtime-nodes span { padding: 2.5mm; }
+  .overtime-print-note { margin-top: 5mm; }
+  .overtime-print-report > footer { margin-top: 6mm; padding-top: 3mm; border-top: 1px solid #cbd5e1; color: #64748b; font-size: 8pt; }
 }

@@ -41,9 +41,13 @@ const versionSeven = { schemaVersion: 7, data: dataFor(preV8Stores) };
 assert.strictEqual(adapter.validateImport(versionSeven), true, 'V7 backup must remain importable without labor and life stores');
 assert.throws(() => adapter.validateImport({schemaVersion:7,data:dataFor(preV8Stores.filter((name)=>name!=='templates'))}),/templates/,'V7 backups must include templates');
 const versionEight={schemaVersion:8,data:dataFor(STORES)};
-assert.strictEqual(DB_VERSION,8);
+delete versionEight.data.overtimeStatusRecords;
+assert.strictEqual(DB_VERSION,9);
 assert.strictEqual(adapter.validateImport(versionEight),true,'V8 backups include all labor and life stores');
-assert.throws(()=>adapter.validateImport({schemaVersion:8,data:dataFor(STORES.filter((name)=>name!=='salaryRecords'))}),/salaryRecords/,'V8 backups must include labor stores');
+assert.throws(()=>adapter.validateImport({schemaVersion:8,data:dataFor(STORES.filter((name)=>!['salaryRecords','overtimeStatusRecords'].includes(name)))}),/salaryRecords/,'V8 backups must include original labor stores');
+const versionNine={schemaVersion:9,data:dataFor(STORES)};
+assert.strictEqual(adapter.validateImport(versionNine),true,'V9 backups include overtime status records');
+assert.throws(()=>adapter.validateImport({schemaVersion:9,data:dataFor(STORES.filter((name)=>name!=='overtimeStatusRecords'))}),/overtimeStatusRecords/,'V9 backups must include status records');
 
 (async () => {
   const mergeAdapter = new LocalStorageAdapter();
@@ -51,7 +55,7 @@ assert.throws(()=>adapter.validateImport({schemaVersion:8,data:dataFor(STORES.fi
   mergeAdapter.all = async (name) => structuredClone(memory[name]);
   mergeAdapter.putMany = async (name, values) => { memory[name].push(...structuredClone(values)); };
   const payload = {
-    schemaVersion: 8,
+    schemaVersion: 9,
     data: dataFor(STORES),
   };
   payload.data.tasks = [{ id:'existing', title:'must not overwrite' }, { id:'incoming', title:'new task' }];
