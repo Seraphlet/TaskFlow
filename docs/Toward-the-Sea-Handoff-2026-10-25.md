@@ -136,6 +136,7 @@ index.html
 - 本地模板中心、变量填充、搜索、分类、收藏和复制
 - Task 管理、进度更新、Activity 和交接历史
 - 劳动与生活：工资和工时历史、加班收益曲线、生活成本与储蓄预测、目标薪资和候选工作比较
+- 工作页面 Fluent / Mica 界面：桌面主导航可折叠，Notes / Templates / Radar / Settings 拥有独立内容侧栏；Home 和数字艺术保持原布局与视觉
 - Local / Memos Notes、草稿恢复和标题为空正文兼容
 - 内容分类、中文输入法兼容和稳定分类 ID
 - Radar 的 Tavily / DeepSeek 联网发现、预算、缓存和历史
@@ -164,7 +165,7 @@ V8 新增“劳动与生活”集合：
 - `laborParameters`
 - `jobComparisons`
 
-工资、生活、加班和工作比较记录均把用户输入的 `facts` 与保存时的计算 `snapshot` 分开存储，避免以后调整参数时静默覆盖历史判断。V1–V7 旧备份仍可导入；只有 V8 备份要求包含上述五个集合。
+工资、生活、加班和工作比较记录均把用户输入的 `facts` 与保存时的计算 `snapshot` 分开存储，避免以后调整参数时静默覆盖历史判断。工资 V2 使用月份、实际工作天数、每日工时、工作日额外加班小时、周末天数和法定节假日天数；实际总工时不会重复加入周末与节假日工时。`formulaVersion < 2` 的旧记录继续使用原字段和原公式编辑，不进行破坏性迁移。V1–V7 旧备份仍可导入；只有 V8 备份要求包含上述五个集合。
 
 原有 Tasks、Activity、Handoffs、Team、Notes、Notes Drafts 和 Radar 集合保持兼容。
 
@@ -212,7 +213,7 @@ git diff --check
 
 当前基线结果：
 
-- 19 组 JavaScript 测试通过
+- 20 组 JavaScript 测试通过（包含 Fluent UI 契约与工资 V2 边界）
 - Python：25 passed，4 个子测试通过
 - 已知测试警告：Starlette TestClient 的 `httpx` 弃用提示，不影响当前通过结果
 
@@ -241,6 +242,8 @@ git diff --check
 ## 12. 当前阶段结论
 
 截至 2026-11-05，“劳动与生活”四阶段功能已经增量并入 Toward the Sea：工资记录和时薪估算、加班决策、生活成本与储蓄预测、职业目标与工作比较均可独立使用并纳入 V8 备份。后续工作不要重建项目、重置 IndexedDB 或批量重命名 `taskflow-*` 兼容标识。
+
+工作页面在 2026-11-05 完成 Fluent V3 增量重构。新样式集中在 `styles.css` 尾部，并严格以 `.app-shell:not(.home-shell):not(.playground-shell)` 为作用域；Drawer 也用路由类排除 Home 与 Playground。以后调整视觉时必须保留这个隔离边界。设置页仍使用原保存动作与数据结构，只改变分类导航和默认展示层级；Radar、Notes、Templates 的内容侧栏只属于各自模块，不与主导航共用折叠状态。
 
 ## 13. 新任务接手建议
 

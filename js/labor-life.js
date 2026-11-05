@@ -18,7 +18,7 @@
     return round(unit === 'days' ? amount * dailyHours : amount, 4);
   }
 
-  function calculateSalary(facts = {}) {
+  function calculateSalaryLegacy(facts = {}) {
     const totalSalary = number(facts.totalSalary, '实际总工资', { min:0, max:1e9, required:true });
     const normalDays = number(facts.normalDays, '正常工作天数', { min:0, max:366, required:true });
     const dailyHours = number(facts.dailyHours, '每日正常工时', { min:0, max:24, required:true });
@@ -42,6 +42,37 @@
       estimatedBaseHourlyRate:weightedHours > EPSILON ? round(attributablePay / weightedHours) : null,
       formulaVersion:1,
     };
+  }
+
+  function calculateSalaryV2(facts = {}) {
+    const totalSalary=number(facts.totalSalary,'实际总工资',{min:0,max:1e9,required:true});
+    const actualWorkDays=number(facts.actualWorkDays,'实际上班总天数',{min:0,max:366,required:true});
+    const dailyHours=number(facts.dailyHours,'每天正常工作小时',{min:0,max:24,required:true});
+    const weekdayOvertimeHours=number(facts.weekdayOvertimeHours,'工作日额外加班小时',{min:0,max:10000});
+    const weekendOvertimeDays=number(facts.weekendOvertimeDays,'周六日加班天数',{min:0,max:366});
+    const holidayOvertimeDays=number(facts.holidayOvertimeDays,'法定节假日加班天数',{min:0,max:366});
+    if(weekendOvertimeDays+holidayOvertimeDays>actualWorkDays+EPSILON)throw new Error('周末与法定节假日加班天数不能超过实际上班总天数');
+    const normalWeekdays=round(actualWorkDays-weekendOvertimeDays-holidayOvertimeDays,4);
+    const normalHours=round(actualWorkDays*dailyHours,4);
+    const overtime15Hours=round(weekdayOvertimeHours,4);
+    const overtime20Hours=round(weekendOvertimeDays*dailyHours,4);
+    const overtime30Hours=round(holidayOvertimeDays*dailyHours,4);
+    const overtimeTotalHours=round(overtime15Hours+overtime20Hours+overtime30Hours,4);
+    const totalWorkHours=round(normalHours+weekdayOvertimeHours,4);
+    if(totalWorkHours<=0)throw new Error('实际工作总时长必须大于 0');
+    const bonus=number(facts.bonus,'奖金',{min:0,max:1e9});
+    const allowance=number(facts.allowance,'补贴',{min:0,max:1e9});
+    const deductions=number(facts.deductions,'扣款',{min:0,max:1e9});
+    const attributablePay=round(totalSalary-bonus-allowance+deductions,4);
+    if(attributablePay<0)throw new Error('奖金与补贴不能超过实际工资加扣款，否则无法反推工时工资');
+    const weightedHours=round(normalWeekdays*dailyHours+weekdayOvertimeHours*1.5+overtime20Hours*2+overtime30Hours*3,4);
+    const estimatedBaseHourlyRate=weightedHours>EPSILON?round(attributablePay/weightedHours):null;
+    const theoreticalOvertimePay=estimatedBaseHourlyRate==null?null:round(estimatedBaseHourlyRate*(weekdayOvertimeHours*1.5+overtime20Hours*2+overtime30Hours*3));
+    return {totalSalary:round(totalSalary),actualWorkDays,normalWeekdays,dailyHours,normalHours,overtime15Hours,overtime20Hours,overtime30Hours,overtimeTotalHours,totalWorkHours,overtimeShare:optionalRatio(overtimeTotalHours,totalWorkHours),averageHourlyRate:round(totalSalary/totalWorkHours),attributablePay:round(attributablePay),weightedHours,estimatedBaseHourlyRate,theoreticalOvertimePay,formulaVersion:2};
+  }
+
+  function calculateSalary(facts = {}) {
+    return facts.recordVersion===2||facts.month||Object.prototype.hasOwnProperty.call(facts,'actualWorkDays')?calculateSalaryV2(facts):calculateSalaryLegacy(facts);
   }
 
   function normalizeOvertimeInput(input = {}) {
@@ -173,5 +204,5 @@
     return signals;
   }
 
-  window.TaskFlowLaborLife={round,overtimeHours,calculateSalary,normalizeOvertimeInput,overtimePoint,analyzeOvertime,calculateLiving,forecastSavings,salaryTargets,compareJobs,decisionSignals};
+  window.TaskFlowLaborLife={round,overtimeHours,calculateSalary,calculateSalaryLegacy,calculateSalaryV2,normalizeOvertimeInput,overtimePoint,analyzeOvertime,calculateLiving,forecastSavings,salaryTargets,compareJobs,decisionSignals};
 })();

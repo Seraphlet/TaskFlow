@@ -15,6 +15,18 @@ assert.strictEqual(salary.averageHourlyRate,56.18);
 assert.strictEqual(salary.estimatedBaseHourlyRate,45.55);
 assert.throws(()=>api.calculateSalary({totalSalary:1,normalDays:0,dailyHours:0}),/总时长/);
 
+const monthly=api.calculateSalary({recordVersion:2,month:'2026-11',totalSalary:12000,actualWorkDays:25,dailyHours:8,weekdayOvertimeHours:10,weekendOvertimeDays:3,holidayOvertimeDays:0,bonus:0,allowance:0,deductions:0});
+assert.strictEqual(monthly.formulaVersion,2);
+assert.strictEqual(monthly.totalWorkHours,210,'weekend days are already included in actual work days');
+assert.strictEqual(monthly.overtime20Hours,24,'weekend classification converts days using daily hours');
+assert.strictEqual(monthly.averageHourlyRate,57.14);
+assert.strictEqual(monthly.weightedHours,239,'weighted estimate separates ordinary, weekday overtime, and weekend work');
+const mixedMonthly=api.calculateSalary({recordVersion:2,month:'2026-10',totalSalary:10000,actualWorkDays:24,dailyHours:8,weekdayOvertimeHours:4,weekendOvertimeDays:2,holidayOvertimeDays:1});
+assert.strictEqual(mixedMonthly.totalWorkHours,196,'weekend and holiday days do not increase actual day count twice');
+assert.strictEqual(mixedMonthly.overtime30Hours,8);
+assert.throws(()=>api.calculateSalary({recordVersion:2,month:'2026-09',totalSalary:1,actualWorkDays:2,dailyHours:8,weekendOvertimeDays:2,holidayOvertimeDays:1}),/不能超过/);
+assert.throws(()=>api.calculateSalary({recordVersion:2,month:'2026-09',totalSalary:1,actualWorkDays:0,dailyHours:8}),/总时长/);
+
 const overtime=api.analyzeOvertime({scenario:'rest-day',baseHourlyRate:50,multiplier:2,durationValue:4,durationUnit:'hours',dailyHours:8,fixedCost:100,variableCostPerHour:5,commuteHours:2,restValuePerHour:20,fatigueCoefficient:3,maxHours:12});
 assert.strictEqual(overtime.points[0].cashNetValue,0,'no overtime does not incur fixed cost');
 assert.strictEqual(overtime.points[0].comprehensiveValue,0,'zero hours remains a legal candidate');
