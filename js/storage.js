@@ -1,7 +1,8 @@
 (() => {
 const DB_NAME = 'taskflow-workspace-v1';
-const DB_VERSION = 7;
-const ACTIVE_STORES = ['tasks', 'activity', 'handoffs', 'team', 'notes', 'noteDrafts', 'radar', 'radarProfiles', 'radarBatches', 'radarHistory', 'captures', 'todos', 'calendarEvents', 'templates', 'reminders'];
+const DB_VERSION = 8;
+const LABOR_LIFE_STORES = ['salaryRecords', 'overtimeDecisions', 'livingRecords', 'laborParameters', 'jobComparisons'];
+const ACTIVE_STORES = ['tasks', 'activity', 'handoffs', 'team', 'notes', 'noteDrafts', 'radar', 'radarProfiles', 'radarBatches', 'radarHistory', 'captures', 'todos', 'calendarEvents', 'templates', 'reminders', ...LABOR_LIFE_STORES];
 // Keep the retired stores in the database/backup contract so an upgrade never
 // deletes historical browser data. The application no longer loads or exposes
 // them in its UI.
@@ -79,11 +80,11 @@ class LocalStorageAdapter {
 
   async exportData() {
     const entries = await Promise.all(STORES.map(async (name) => [name, await this.all(name)]));
-    return { schemaVersion: 7, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
+    return { schemaVersion: DB_VERSION, exportedAt: new Date().toISOString(), data: Object.fromEntries(entries) };
   }
 
   validateImport(payload) {
-    if (!payload || ![1, 2, 3, 4, 5, 6, 7].includes(payload.schemaVersion) || !payload.data || typeof payload.data !== 'object') {
+    if (!payload || ![1, 2, 3, 4, 5, 6, 7, 8].includes(payload.schemaVersion) || !payload.data || typeof payload.data !== 'object') {
       throw new Error('备份文件版本或结构无效');
     }
     for (const name of STORES) {
@@ -93,7 +94,8 @@ class LocalStorageAdapter {
         (name === 'radar' && payload.schemaVersion < 3) ||
         (['radarProfiles', 'radarBatches'].includes(name) && payload.schemaVersion < 4) ||
         (name === 'radarHistory' && payload.schemaVersion < 5) ||
-        (['captures','todos','calendarEvents','templates','reminders'].includes(name) && payload.schemaVersion < 7);
+        (['captures','todos','calendarEvents','templates','reminders'].includes(name) && payload.schemaVersion < 7) ||
+        (LABOR_LIFE_STORES.includes(name) && payload.schemaVersion < 8);
       if (optionalLegacyStore && payload.data[name] == null) continue;
       if (!Array.isArray(payload.data[name])) throw new Error(`备份缺少有效的 ${name} 集合`);
       if (payload.data[name].some((item) => !item || typeof item !== 'object' || typeof item.id !== 'string')) {
@@ -123,5 +125,5 @@ class RemoteStorageAdapter {
   constructor() { throw new Error('Remote storage is not configured'); }
 }
 
-window.TaskFlowStorage = { LocalStorageAdapter, RemoteStorageAdapter, STORES, ACTIVE_STORES };
+window.TaskFlowStorage = { LocalStorageAdapter, RemoteStorageAdapter, STORES, ACTIVE_STORES, DB_VERSION, LABOR_LIFE_STORES };
 })();

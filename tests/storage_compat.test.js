@@ -11,7 +11,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(source, context);
 
-const { LocalStorageAdapter, STORES } = context.window.TaskFlowStorage;
+const { LocalStorageAdapter, STORES, LABOR_LIFE_STORES, DB_VERSION } = context.window.TaskFlowStorage;
 const adapter = new LocalStorageAdapter();
 const dataFor = (stores) => Object.fromEntries(stores.map((name) => [name, []]));
 
@@ -36,9 +36,14 @@ assert.throws(
   'V6 backups must include the draft collection',
 );
 
-const versionSeven = { schemaVersion: 7, data: dataFor(STORES) };
-assert.strictEqual(adapter.validateImport(versionSeven), true, 'V7 backup with all personal workspace stores must validate');
-assert.throws(() => adapter.validateImport({schemaVersion:7,data:dataFor(STORES.filter((name)=>name!=='templates'))}),/templates/,'V7 backups must include templates');
+const preV8Stores=STORES.filter((name)=>!LABOR_LIFE_STORES.includes(name));
+const versionSeven = { schemaVersion: 7, data: dataFor(preV8Stores) };
+assert.strictEqual(adapter.validateImport(versionSeven), true, 'V7 backup must remain importable without labor and life stores');
+assert.throws(() => adapter.validateImport({schemaVersion:7,data:dataFor(preV8Stores.filter((name)=>name!=='templates'))}),/templates/,'V7 backups must include templates');
+const versionEight={schemaVersion:8,data:dataFor(STORES)};
+assert.strictEqual(DB_VERSION,8);
+assert.strictEqual(adapter.validateImport(versionEight),true,'V8 backups include all labor and life stores');
+assert.throws(()=>adapter.validateImport({schemaVersion:8,data:dataFor(STORES.filter((name)=>name!=='salaryRecords'))}),/salaryRecords/,'V8 backups must include labor stores');
 
 (async () => {
   const mergeAdapter = new LocalStorageAdapter();
@@ -46,7 +51,7 @@ assert.throws(() => adapter.validateImport({schemaVersion:7,data:dataFor(STORES.
   mergeAdapter.all = async (name) => structuredClone(memory[name]);
   mergeAdapter.putMany = async (name, values) => { memory[name].push(...structuredClone(values)); };
   const payload = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     data: dataFor(STORES),
   };
   payload.data.tasks = [{ id:'existing', title:'must not overwrite' }, { id:'incoming', title:'new task' }];

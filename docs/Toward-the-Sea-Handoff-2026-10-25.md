@@ -1,9 +1,9 @@
 # Toward the Sea｜设备迁移与开发交接
 
-更新时间：2026-10-25
+更新时间：2026-11-05
 仓库：`git@github.com:Seraphlet/TaskFlow.git`
 分支：`main`
-功能交接基线：`04f4469 fix(ui): guard drawer drags and anchor sidebar footer`
+功能交接基线：以当前 `main` 分支中包含“劳动与生活”模块的最新提交为准（接手时运行 `git log -1 --oneline` 核对）。
 
 ## 1. 最重要的迁移提醒
 
@@ -116,6 +116,7 @@ index.html
 ├─ js/storage.js                      IndexedDB 与 JSON 导入导出
 ├─ js/interaction-guards.js           编辑拖选防误触
 ├─ js/personal-workspace.js           暂存、待办、日历、提醒、模板领域规则
+├─ js/labor-life.js                   劳动与生活的纯计算与校验规则
 ├─ js/notes.js                        Local / Memos Notes 与草稿
 ├─ js/classifications.js              内容类型与主题分类
 ├─ js/content-library.js              内容检索与展示
@@ -134,11 +135,12 @@ index.html
 - 月历、独立事件和到期提醒中心
 - 本地模板中心、变量填充、搜索、分类、收藏和复制
 - Task 管理、进度更新、Activity 和交接历史
+- 劳动与生活：工资和工时历史、加班收益曲线、生活成本与储蓄预测、目标薪资和候选工作比较
 - Local / Memos Notes、草稿恢复和标题为空正文兼容
 - 内容分类、中文输入法兼容和稳定分类 ID
 - Radar 的 Tavily / DeepSeek 联网发现、预算、缓存和历史
 - Music、Keyboard、Life Geometry 数字艺术
-- JSON V1–V7 合并导入与完整本地数据导出
+- JSON V1–V8 合并导入与完整本地数据导出
 
 左侧“个人管理”是默认折叠的 Accordion，包含暂存、待办、日历和模板。桌面端导航区独立滚动；“＋ 快速暂存”与本地状态卡片组成固定 Footer，不会因子菜单展开而移动。
 
@@ -146,13 +148,23 @@ Drawer 的遮罩关闭使用完整指针手势判断：只有 `pointerdown` 和 
 
 ## 7. 本地数据与备份
 
-IndexedDB 数据库版本为 V7。新增集合包括：
+IndexedDB 数据库版本为 V8。V7 的个人工作区集合包括：
 
 - `captures`
 - `todos`
 - `calendarEvents`
 - `templates`
 - `reminders`
+
+V8 新增“劳动与生活”集合：
+
+- `salaryRecords`
+- `overtimeDecisions`
+- `livingRecords`
+- `laborParameters`
+- `jobComparisons`
+
+工资、生活、加班和工作比较记录均把用户输入的 `facts` 与保存时的计算 `snapshot` 分开存储，避免以后调整参数时静默覆盖历史判断。V1–V7 旧备份仍可导入；只有 V8 备份要求包含上述五个集合。
 
 原有 Tasks、Activity、Handoffs、Team、Notes、Notes Drafts 和 Radar 集合保持兼容。
 
@@ -200,7 +212,7 @@ git diff --check
 
 当前基线结果：
 
-- 17 组 JavaScript 测试通过
+- 19 组 JavaScript 测试通过
 - Python：25 passed，4 个子测试通过
 - 已知测试警告：Starlette TestClient 的 `httpx` 弃用提示，不影响当前通过结果
 
@@ -216,6 +228,8 @@ git diff --check
 
 ## 11. 已知限制与人工验收
 
+- “劳动与生活”不提供税前转税后计算；候选工作为税前口径时，必须填写用户自己的税后估算才能比较。疲劳成本、休息时间价值和未来增长率均是主观假设，不是法律、医学或投资建议。
+- 趋势图使用轻量原生 SVG；图表时间范围按最近 6 期、12 期或全部记录筛选。自定义周期的记录按周期起始日期排序，不把预测点伪装成真实历史。
 - 纯前端提醒只保证页面打开或重新打开后显示，不保证关闭网页时后台推送。
 - Templates 仅本地保存，不同步 Memos。
 - `file://` 下 Playground 动态模块和远端请求可能受浏览器安全策略限制。
@@ -226,7 +240,7 @@ git diff --check
 
 ## 12. 当前阶段结论
 
-截至 `04f4469`，本轮 Toward the Sea 功能开发与交互收口已完成，可以作为换设备后的稳定接手基线。后续工作应按新需求增量开展，不要重建项目、重置 IndexedDB 或批量重命名 `taskflow-*` 兼容标识。
+截至 2026-11-05，“劳动与生活”四阶段功能已经增量并入 Toward the Sea：工资记录和时薪估算、加班决策、生活成本与储蓄预测、职业目标与工作比较均可独立使用并纳入 V8 备份。后续工作不要重建项目、重置 IndexedDB 或批量重命名 `taskflow-*` 兼容标识。
 
 ## 13. 新任务接手建议
 

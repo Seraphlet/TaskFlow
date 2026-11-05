@@ -1,6 +1,6 @@
 # Toward the Sea V1
 
-一个无构建依赖的本地优先个人工作台，包含 Home、临时暂存、个人待办、日历提醒、模板中心、Radar、Notes、Categories、Tasks 和按需加载的 Playground。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，个人事项、任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
+一个无构建依赖的本地优先个人工作台，包含 Home、临时暂存、个人待办、日历提醒、模板中心、劳动与生活、Radar、Notes、Categories、Tasks 和按需加载的 Playground。前端使用传统 HTML、CSS 和 JavaScript；首页只聚合已有本地数据，个人事项、劳动生活记录、任务、笔记以及 Radar Demo 无需后端即可使用。真实联网 Radar 通过可选的 FastAPI 服务调用 Tavily 与 DeepSeek。
 
 更换开发设备或重新接手项目时，请先阅读 [`docs/Toward-the-Sea-Handoff-2026-10-25.md`](docs/Toward-the-Sea-Handoff-2026-10-25.md)。
 
@@ -52,6 +52,7 @@ js/notes.js             Local / Memos Notes 适配器、凭据策略与 API 版�
 js/content-library.js   内容类型兼容、组合检索、高亮与来源链接校验
 js/radar.js             Radar Item 模型、演示 Provider 与生成边界
 js/personal-workspace.js 暂存、待办、提醒、月历与模板变量的领域规则
+js/labor-life.js         工资、加班、生活成本、储蓄预测与工作比较的纯计算规则
 js/playground/           按需加载的 Music、Keyboard 与 Life Geometry 独立作品及人生引擎
 docs/                   Life Geometry JSON 契约说明
 examples/               可直接导入的人物模板与固定故事 JSON
@@ -74,6 +75,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 ## 数据与兼容性
 
 - Tasks、Team、Activity、Handoffs、Local Notes、Notes 草稿、Radar Profiles / Batches，以及 Captures、Todos、Calendar Events、Templates、Reminders 分别保存在当前浏览器的 IndexedDB 独立集合中。
+- “劳动与生活”把工资记录、加班决策、生活成本、个人参数和候选工作比较保存在五个独立集合中。每条历史记录同时保存原始事实与当时的计算快照；之后修改默认参数不会改写过去的判断。趋势图只使用真实记录，未来储蓄曲线明确标记为假设预测。
 - 临时暂存用于无结构的快速收集；待处理内容长期保留，完成内容可立即撤销并在 24 小时后自动清理。转为个人待办使用稳定来源关联，重复操作不会创建第二条待办。个人待办与可交接的 Task 是两套独立数据。
 - 日历只聚合指定日期的个人待办与独立事件，不复制其正文。提醒引用待办或事件 ID，并记录已读/忽略状态；网页关闭时不承诺后台通知，重新打开后会补显已到期提醒。
 - 模板中心只保存模板原文、分类与收藏状态；`{{变量}}` 在预览和复制时临时填充，空值继续保留占位符，不会修改模板原文。模板不会同步到 Memos。
@@ -86,7 +88,7 @@ tests/                  凭证安全、模型校验和 API 边界测试
 - 客户端单日联网探索上限默认 3 次，可在 Settings 设置为 1–50；计数按当前设备的本地日期和浏览器数据计算，测试连接、演示探索、被互斥锁拒绝及达到限额的操作不消耗次数。
 - Tavily 搜索深度默认 `basic`（官方计费 1 credit）；`advanced` 为 2 credits。可通过 `TASKFLOW_TAVILY_SEARCH_DEPTH=basic|advanced|fast|ultra-fast` 调整。月度硬预算默认每组凭证身份 1000 credits，通过 `TASKFLOW_TAVILY_MONTHLY_CREDIT_BUDGET` 调整（旧变量 `TASKFLOW_TAVILY_MONTHLY_BUDGET` 仍兼容）。请求发出前原子预留 credits，成功响应优先使用官方 `usage.credits` 结算；响应无法确认时保留保守预留并在历史中标记。预算、缓存和跨 Profile 去重使用不可逆 HMAC 身份隔离，SQLite 数据在服务重启后继续有效。
 - 已退役的 `companies` / `comments` 仓库仅为旧数据库和备份结构兼容而保留，不再加载到应用状态，也不再提供查看、编辑或迁移入口。
-- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1–V7 备份均可兼容导入。V7 备份包含个人暂存、待办、事件、模板和提醒；导入时已经超过保留期限的已完成暂存会被跳过。Memos 远端数据和访问令牌不会进入导出文件。
+- JSON 导入采用合并策略，不覆盖具有相同 ID 的现有记录；V1–V8 备份均可兼容导入。V7 备份包含个人暂存、待办、事件、模板和提醒，V8 增加劳动与生活的五类数据；导入时已经超过保留期限的已完成暂存会被跳过。Memos 远端数据和访问令牌不会进入导出文件。
 - `file://` 存储可能被不同浏览器或文件路径隔离。启动时若 IndexedDB 不可用，应用会明确报错而不是静默丢失数据。
 
 ## Memos（可选）

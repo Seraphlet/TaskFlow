@@ -6,6 +6,7 @@ const { normalizeNote, tokenize, searchNotes, highlightHtml, contentTypeLabel, c
 const { ClassificationStore, DEFAULT_CONTENT_TYPES, DEFAULT_CATEGORIES } = window.TaskFlowClassifications;
 const { TEMPLATE_DEFAULT_CATEGORIES, localDateKey, isExpiredCapture, todoMatchesView, shiftDate, reminderId, dueReminders, extractTemplateVariables, fillTemplate, monthGrid } = window.TaskFlowPersonalWorkspace;
 const { createPointerActivationGuard } = window.TaskFlowInteractionGuards;
+const { calculateSalary, analyzeOvertime, calculateLiving, forecastSavings, salaryTargets, compareJobs, decisionSignals } = window.TaskFlowLaborLife;
 
 const storage = new LocalStorageAdapter();
 const notifications = new NoopNotificationAdapter();
@@ -23,7 +24,7 @@ const NOTES_UI_KEY = 'taskflow-notes-ui-v1';
 const CATEGORY_TAGS_KEY = 'taskflow-content-quick-tags-v1';
 const DEFAULT_CATEGORY_TAGS = ['总结', '翻译', '代码', '写作'];
 function loadCategoryQuickTags() { try { const value=JSON.parse(localStorage.getItem(CATEGORY_TAGS_KEY)); return Array.isArray(value) ? value.map((item)=>String(item).trim()).filter(Boolean).slice(0,20) : [...DEFAULT_CATEGORY_TAGS]; } catch { return [...DEFAULT_CATEGORY_TAGS]; } }
-const state = { route: 'home', openNavGroup:null, playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', categorySearch:'', categoryType:'All', categoryExpandedId:null, categoryQuickTags:loadCategoryQuickTags(), categoryTagEditor:false, classifications:classificationStore.read(), localClassificationNotes:[], todoView:'today', calendarMonth:localDateKey().slice(0,7), calendarDate:localDateKey(), templateSearch:'', templateCategory:'All', templateFavorites:false, templateId:null, templateValues:{}, status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
+const state = { route: 'home', openNavGroup:null, playgroundView: 'list', taskId: null, noteId: null, noteDraft: null, noteDraftRevision: 0, noteDraftRestored: false, noteSaving: false, selectedCategory: 'All', search: '', categorySearch:'', categoryType:'All', categoryExpandedId:null, categoryQuickTags:loadCategoryQuickTags(), categoryTagEditor:false, classifications:classificationStore.read(), localClassificationNotes:[], todoView:'today', calendarMonth:localDateKey().slice(0,7), calendarDate:localDateKey(), templateSearch:'', templateCategory:'All', templateFavorites:false, templateId:null, templateValues:{}, laborTab:'salary', laborRange:'all', laborTrendMetric:'averageHourlyRate', laborOvertimeMetric:'comprehensiveValue', laborEditingOvertimeId:null, laborEditingJobId:null, status: 'All', taskHistoryTab: 'activity', drawer: null, data: {}, notes: [], notesMode: 'Local', notesError: '', memosTest: null, radarProfiles: [], radarBatches: [], radarHistory: [], radarProfileId: '', radarMessage: '', radarTest: null, radarSearching: false };
 let noteDraftTimer = null;
 let noteDraftWrite = Promise.resolve();
 let appLoaded = false;
@@ -246,6 +247,7 @@ function shell(content, title, subtitle) {
           ${navButton('notes','✎','随手笔记')}
           ${navButton('categories','◇','内容分类')}
           ${navButton('tasks','▣','任务管理')}
+          ${navButton('labor-life','◒','劳动与生活')}
           ${navButton('playground','✦','数字艺术')}
         </nav>
       </div>
@@ -461,6 +463,134 @@ async function mountArtwork(kind) {
     if (token !== artworkLoadToken || !mount.isConnected) return;
     mount.innerHTML = `<div class="playground-load-error"><b>作品暂时无法启动</b><p>${esc(error.message || '模块加载失败')}</p><button class="btn" type="button" data-playground-retry="${kind}">重试</button></div>`;
   }
+}
+
+const laborMoney = (value) => Number.isFinite(Number(value)) ? new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY',maximumFractionDigits:2}).format(Number(value)) : '—';
+const laborNumber = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits).replace(/\.0$/,'') : '—';
+const laborPercent = (value) => Number.isFinite(Number(value)) ? `${(Number(value)*100).toFixed(1)}%` : '—';
+const laborDateLabel = (facts = {}) => facts.month || [facts.periodStart,facts.periodEnd].filter(Boolean).join(' ～ ') || facts.date || '未注明日期';
+const laborSort = (items, field = 'periodStart') => [...(items||[])].sort((a,b)=>String(a.facts?.[field]||a.facts?.date||a.createdAt||'').localeCompare(String(b.facts?.[field]||b.facts?.date||b.createdAt||'')));
+const laborLatest = (store, field) => laborSort(state.data[store],field).at(-1) || null;
+const laborRangeRecords = (items) => state.laborRange === 'all' ? items : items.slice(-Math.max(1,Number(state.laborRange)||12));
+
+function laborParams() {
+  const saved=state.data.laborParameters?.find((item)=>item.id==='default')?.facts||{};
+  return {safetyMonths:3,targetMonthlySavings:2000,bufferRatio:0.15,forecastMonths:12,annualIncomeGrowth:0,annualSpendingGrowth:0,currentCommuteDaily:0,...saved};
+}
+
+function laborChart(series, {height=250, valueFormatter=(value)=>laborNumber(value,1)} = {}) {
+  const clean=series.map((item)=>({...item,points:(item.points||[]).filter((point)=>Number.isFinite(Number(point.value)))})).filter((item)=>item.points.length);
+  if(!clean.length)return '<div class="labor-chart-empty">数据不足，保存记录后显示真实趋势。</div>';
+  const labels=[...new Set(clean.flatMap((item)=>item.points.map((point)=>String(point.label))))];
+  const values=clean.flatMap((item)=>item.points.map((point)=>Number(point.value)));
+  let min=Math.min(...values),max=Math.max(...values);if(Math.abs(max-min)<1e-9){const pad=Math.max(1,Math.abs(max)*.1);min-=pad;max+=pad;}else{const pad=(max-min)*.12;min-=pad;max+=pad;}
+  const width=760,pad={left:58,right:24,top:28,bottom:45},innerW=width-pad.left-pad.right,innerH=height-pad.top-pad.bottom;
+  const x=(label)=>pad.left+(labels.length===1?innerW/2:labels.indexOf(String(label))*innerW/(labels.length-1));
+  const y=(value)=>pad.top+(max-Number(value))*innerH/(max-min);
+  const grid=Array.from({length:5},(_,index)=>{const value=max-(max-min)*index/4;const py=pad.top+innerH*index/4;return `<line x1="${pad.left}" y1="${py}" x2="${width-pad.right}" y2="${py}"/><text x="${pad.left-8}" y="${py+4}" text-anchor="end">${esc(valueFormatter(value))}</text>`;}).join('');
+  const lines=clean.map((item)=>{const points=item.points.map((point)=>`${x(point.label)},${y(point.value)}`).join(' ');const dots=item.points.map((point)=>`<circle cx="${x(point.label)}" cy="${y(point.value)}" r="${point.id?5:3.5}" fill="${item.color}" ${point.id?`data-labor-record="${esc(point.id)}" data-labor-store="${esc(point.store||'')}" tabindex="0" role="button"`:''}><title>${esc(point.label)} · ${esc(item.label)} ${esc(valueFormatter(point.value))}</title></circle>`).join('');return `<polyline points="${points}" fill="none" stroke="${item.color}" stroke-width="2.5" vector-effect="non-scaling-stroke"/>${dots}`;}).join('');
+  const labelStep=Math.max(1,Math.ceil(labels.length/6));const xLabels=labels.map((label,index)=>index%labelStep===0||index===labels.length-1?`<text x="${x(label)}" y="${height-14}" text-anchor="middle">${esc(label)}</text>`:'').join('');
+  return `<div class="labor-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="趋势图"><g class="labor-grid">${grid}${xLabels}</g>${lines}</svg><div class="labor-chart-legend">${clean.map((item)=>`<span><i style="background:${item.color}"></i>${esc(item.label)}</span>`).join('')}</div></div>`;
+}
+
+function laborSalarySection() {
+  const records=laborSort(state.data.salaryRecords,'periodStart');
+  const chartRecords=laborRangeRecords(records);
+  const metrics={totalSalary:['实际工资',(v)=>laborMoney(v)],averageHourlyRate:['平均实际时薪',(v)=>laborMoney(v)],estimatedBaseHourlyRate:['反推基础时薪',(v)=>laborMoney(v)],totalWorkHours:['总工作时长',(v)=>`${laborNumber(v)}h`],overtimeTotalHours:['加班时长',(v)=>`${laborNumber(v)}h`],overtimeShare:['加班占比',(v)=>laborPercent(v)]};
+  const [metricLabel,formatter]=metrics[state.laborTrendMetric]||metrics.averageHourlyRate;
+  const points=chartRecords.map((item)=>({label:laborDateLabel(item.facts),value:item.snapshot?.[state.laborTrendMetric],id:item.id,store:'salaryRecords'}));
+  return `<section class="labor-section"><div class="labor-section-head"><div><h4>工资与劳动记录</h4><p>总工资是税后到手且已包含调整项；奖金、补贴和扣款仅用于拆分工时工资。</p></div><button class="btn primary" data-open="new-salary">＋ 新增记录</button></div>
+    <div class="card labor-chart-card"><div class="labor-chart-toolbar"><b>${esc(metricLabel)}变化</b><select class="select compact" id="labor-trend-metric">${Object.entries(metrics).map(([key,[label]])=>`<option value="${key}" ${key===state.laborTrendMetric?'selected':''}>${label}</option>`).join('')}</select></div>${laborChart([{label:metricLabel,color:'#e7654f',store:'salaryRecords',points}],{valueFormatter:formatter})}</div>
+    <div class="card labor-table">${records.length?`<table><thead><tr><th>周期</th><th>到手工资</th><th>总工时</th><th>加班</th><th>实际时薪</th><th>基础时薪估算</th><th></th></tr></thead><tbody>${records.slice().reverse().map((item)=>`<tr><td><button class="labor-record-link" data-edit-salary="${esc(item.id)}">${esc(laborDateLabel(item.facts))}</button></td><td>${laborMoney(item.snapshot?.totalSalary)}</td><td>${laborNumber(item.snapshot?.totalWorkHours)}h</td><td>${laborNumber(item.snapshot?.overtimeTotalHours)}h · ${laborPercent(item.snapshot?.overtimeShare)}</td><td>${laborMoney(item.snapshot?.averageHourlyRate)}</td><td>${laborMoney(item.snapshot?.estimatedBaseHourlyRate)}</td><td class="row-actions"><button class="btn small" data-edit-salary="${esc(item.id)}">编辑</button><button class="btn small danger" data-delete-labor="salaryRecords:${esc(item.id)}">删除</button></td></tr>`).join('')}</tbody></table>`:empty('还没有工资记录','保存第一条真实工资和工时后开始形成趋势。')}</div>
+    <details class="labor-formula"><summary>查看计算口径</summary><p>实际工作总时长 = 正常天数 × 每日工时 + 各类额外加班小时。平均实际时薪 = 到手工资 ÷ 实际工作总时长。反推基础时薪 =（到手工资 − 奖金 − 补贴 + 扣款）÷ 加权工时。反推结果是工资结构估算，不等同于合同约定。</p></details></section>`;
+}
+
+function overtimeFormFacts() {
+  const editing=state.data.overtimeDecisions?.find((item)=>item.id===state.laborEditingOvertimeId);
+  const latestSalary=laborLatest('salaryRecords','periodStart');
+  return {date:localDateKey(),scenario:'after-work',baseHourlyRate:latestSalary?.snapshot?.estimatedBaseHourlyRate||0,multiplier:1.5,durationValue:2,durationUnit:'hours',dailyHours:8,fixedCost:0,variableCostPerHour:0,commuteHours:0,restValuePerHour:0,fatigueCoefficient:0,maxHours:12,note:'',...(editing?.facts||{})};
+}
+
+function overtimeAnalysisHtml(analysis, metric = state.laborOvertimeMetric) {
+  const metricMap={overtimeIncome:['加班收入','#245fa8'],cashNetValue:['现金净收益','#237a5a'],comprehensiveValue:['综合净价值','#e7654f'],marginalNetValue:['边际净收益','#a86100']};const [label,color]=metricMap[metric]||metricMap.comprehensiveValue;
+  const point=(value)=>value?`${laborNumber(value.hours,2)}h`:'不存在';
+  return `<div class="labor-live-summary"><div><span>选择时长</span><b>${laborNumber(analysis.selected.hours,2)}h</b></div><div><span>加班收入</span><b>${laborMoney(analysis.selected.overtimeIncome)}</b></div><div><span>现金净收益</span><b>${laborMoney(analysis.selected.cashNetValue)}</b></div><div><span>综合净价值</span><b>${laborMoney(analysis.selected.comprehensiveValue)}</b></div></div>
+    <div class="labor-node-grid"><span>现金回本点 <b>${point(analysis.nodes.cashBreakEven)}</b></span><span>综合平衡点 <b>${point(analysis.nodes.comprehensiveBreakEven)}</b></span><span>范围内最优点 <b>${point(analysis.nodes.optimal)} · ${laborMoney(analysis.nodes.optimal?.comprehensiveValue)}</b></span><span>收益转负点 <b>${point(analysis.nodes.negativeAfterPositive)}</b></span></div>
+    ${laborChart([{label,color,points:analysis.points.map((item)=>({label:item.hours,value:item[metric]}))}],{valueFormatter:(value)=>laborMoney(value)})}`;
+}
+
+function laborOvertimeSection() {
+  const facts=overtimeFormFacts();let analysis;try{analysis=analyzeOvertime(facts);}catch{analysis=analyzeOvertime({...facts,baseHourlyRate:0});}
+  const decisions=laborSort(state.data.overtimeDecisions,'date').reverse();
+  return `<section class="labor-section"><div class="labor-section-head"><div><h4>加班收益与最优时长</h4><p>现金支出与个人时间价值分开呈现；0 小时始终是合法候选。</p></div>${state.laborEditingOvertimeId?'<button class="btn" data-cancel-overtime-edit>取消编辑</button>':''}</div>
+    <form class="card labor-analysis-form" id="labor-overtime-form"><div class="labor-form-grid">
+      <label>决策日期<input class="input" type="date" name="date" required value="${esc(facts.date)}"></label><label>场景<select class="select" name="scenario"><option value="after-work" ${facts.scenario==='after-work'?'selected':''}>工作日下班后</option><option value="rest-day" ${facts.scenario==='rest-day'?'selected':''}>休息日专门上班</option></select></label>
+      <label>基础时薪<input class="input" type="number" name="baseHourlyRate" min="0" step="0.01" required value="${facts.baseHourlyRate}"></label><label>加班倍率<select class="select" name="multiplier">${[1.5,2,3].map((value)=>`<option value="${value}" ${Number(facts.multiplier)===value?'selected':''}>${value} 倍</option>`).join('')}</select></label>
+      <label>加班时长<input class="input" type="number" name="durationValue" min="0" step="0.25" value="${facts.durationValue}"></label><label>输入单位<select class="select" name="durationUnit"><option value="hours" ${facts.durationUnit==='hours'?'selected':''}>小时</option><option value="days" ${facts.durationUnit==='days'?'selected':''}>天</option></select></label>
+      <label>每日加班工时<input class="input" type="number" name="dailyHours" min="0.25" max="24" step="0.25" value="${facts.dailyHours}"></label><label>最大可选小时<input class="input" type="number" name="maxHours" min="0.25" max="744" step="0.25" value="${facts.maxHours}"></label>
+      <label>额外固定支出<input class="input" type="number" name="fixedCost" min="0" step="0.01" value="${facts.fixedCost}"></label><label>每小时额外支出<input class="input" type="number" name="variableCostPerHour" min="0" step="0.01" value="${facts.variableCostPerHour}"></label>
+    </div><details><summary>高级决策参数</summary><div class="labor-form-grid"><label>额外通勤时间（小时）<input class="input" type="number" name="commuteHours" min="0" step="0.25" value="${facts.commuteHours}"></label><label>休息时间价值（元/小时）<input class="input" type="number" name="restValuePerHour" min="0" step="0.01" value="${facts.restValuePerHour}"></label><label>疲劳成本系数 k<input class="input" type="number" name="fatigueCoefficient" min="0" step="0.01" value="${facts.fatigueCoefficient}"></label></div><p class="field-hint">休息价值与疲劳系数是个人决策假设，不是医学或劳动法标准；疲劳成本采用 k × 小时² ÷ 2。</p></details>
+      <label class="labor-range">滑动选择小时数<input type="range" min="0" max="${facts.maxHours}" step="0.25" value="${Math.min(Number(facts.durationUnit==='hours'?facts.durationValue:0),Number(facts.maxHours))}" data-overtime-range></label>
+      <div class="labor-chart-toolbar"><label>纵轴<select class="select compact" name="metric">${[['overtimeIncome','加班收入'],['cashNetValue','现金净收益'],['comprehensiveValue','综合净价值'],['marginalNetValue','边际净收益']].map(([key,label])=>`<option value="${key}" ${key===state.laborOvertimeMetric?'selected':''}>${label}</option>`).join('')}</select></label><button class="btn primary" type="submit">${state.laborEditingOvertimeId?'更新决策记录':'保存本次决策'}</button></div><div id="labor-overtime-preview">${overtimeAnalysisHtml(analysis)}</div><label>备注<textarea class="textarea" name="note">${esc(facts.note||'')}</textarea></label></form>
+    <div class="labor-history-grid">${decisions.length?decisions.map((item)=>`<article class="card labor-history-card"><span>${esc(item.facts.date)}</span><h5>${item.facts.scenario==='rest-day'?'休息日加班':'工作日加班'} · ${laborNumber(item.snapshot?.selected?.hours)}h</h5><p>现金 ${laborMoney(item.snapshot?.selected?.cashNetValue)} · 综合 ${laborMoney(item.snapshot?.selected?.comprehensiveValue)}</p><div class="row-actions"><button class="btn small" data-edit-overtime="${esc(item.id)}">编辑</button><button class="btn small danger" data-delete-labor="overtimeDecisions:${esc(item.id)}">删除</button></div></article>`).join(''):empty('还没有加班决策','调整参数查看曲线，确认后保存当时的判断。')}</div></section>`;
+}
+
+function laborForecastInput() {
+  const latest=laborLatest('livingRecords','month')?.snapshot||{};const params=laborParams();
+  return {startSavings:params.forecastStartSavings??latest.availableSavings??0,monthlyIncome:params.forecastMonthlyIncome??latest.actualIncome??laborLatest('salaryRecords','periodStart')?.snapshot?.totalSalary??0,monthlySpending:params.forecastMonthlySpending??latest.totalSpending??0,necessaryLiving:params.forecastNecessaryLiving??latest.necessaryLiving??0,safetyMonths:params.safetyMonths,months:params.forecastMonths,annualIncomeGrowth:params.annualIncomeGrowth,annualSpendingGrowth:params.annualSpendingGrowth};
+}
+
+function forecastHtml(value) {
+  const result=forecastSavings(value);return `${laborChart([{label:'储蓄预测',color:'#245fa8',points:result.points.map((point)=>({label:`${point.month}月`,value:point.savings}))},{label:'安全线',color:'#e7654f',points:result.points.map((point)=>({label:`${point.month}月`,value:point.safetyLine}))}],{valueFormatter:laborMoney})}<p class="labor-forecast-note">${result.belowSafetyMonth==null?'预测期内未跌破安全线。':`预计第 ${result.belowSafetyMonth} 个月跌破安全线。`} ${result.exhaustedMonth==null?'预测期内未耗尽。':`预计第 ${result.exhaustedMonth} 个月储蓄耗尽。`} 这是基于可调假设的预测，不是确定事实。</p>`;
+}
+
+function laborLivingSection() {
+  const records=laborSort(state.data.livingRecords,'month');const chartRecords=laborRangeRecords(records);const forecastInput=laborForecastInput();
+  return `<section class="labor-section"><div class="labor-section-head"><div><h4>生活成本与财务可持续性</h4><p>普通生活与工作增量支出分列，避免同一笔费用重复计算。</p></div><button class="btn primary" data-open="new-living">＋ 新增月度记录</button></div>
+    <div class="card labor-chart-card"><b>收入、支出、结余与储蓄余额</b>${laborChart([{label:'收入',color:'#245fa8',store:'livingRecords',points:chartRecords.map((item)=>({label:item.facts.month,value:item.snapshot?.actualIncome,id:item.id,store:'livingRecords'}))},{label:'总支出',color:'#e7654f',points:chartRecords.map((item)=>({label:item.facts.month,value:item.snapshot?.totalSpending}))},{label:'结余',color:'#237a5a',points:chartRecords.map((item)=>({label:item.facts.month,value:item.snapshot?.monthlyBalance}))},{label:'储蓄余额',color:'#7b61a8',points:chartRecords.map((item)=>({label:item.facts.month,value:item.snapshot?.availableSavings}))}],{valueFormatter:laborMoney})}</div>
+    <form class="card labor-forecast-form" id="labor-forecast-form"><div class="labor-chart-toolbar"><div><b>未来储蓄预测</b><p>实际历史不会被预测数据覆盖。</p></div><button class="btn" type="submit">保存预测参数</button></div><div class="labor-form-grid">${[['startSavings','当前储蓄'],['monthlyIncome','预测月收入'],['monthlySpending','预测月支出'],['necessaryLiving','必要生活费'],['safetyMonths','安全线（月）'],['months','预测月数'],['annualIncomeGrowth','收入年增长率 %'],['annualSpendingGrowth','支出年增长率 %']].map(([name,label])=>`<label>${label}<input class="input" type="number" name="${name}" ${['annualIncomeGrowth','annualSpendingGrowth'].includes(name)?'min="-99.99"':'min="0"'} step="0.01" value="${forecastInput[name]}"></label>`).join('')}</div><div id="labor-forecast-preview">${forecastHtml(forecastInput)}</div></form>
+    <div class="card labor-table">${records.length?`<table><thead><tr><th>月份</th><th>收入</th><th>必要生活</th><th>工作增量</th><th>总支出</th><th>结余</th><th>储蓄覆盖</th><th></th></tr></thead><tbody>${records.slice().reverse().map((item)=>`<tr><td>${esc(item.facts.month)}</td><td>${laborMoney(item.snapshot?.actualIncome)}</td><td>${laborMoney(item.snapshot?.necessaryLiving)}</td><td>${laborMoney(item.snapshot?.workRelated)}</td><td>${laborMoney(item.snapshot?.totalSpending)}</td><td>${laborMoney(item.snapshot?.monthlyBalance)}</td><td>${laborNumber(item.snapshot?.savingsCoverageMonths)} 月</td><td class="row-actions"><button class="btn small" data-edit-living="${esc(item.id)}">编辑</button><button class="btn small danger" data-delete-labor="livingRecords:${esc(item.id)}">删除</button></td></tr>`).join('')}</tbody></table>`:empty('还没有生活记录','保存月度生活成本后显示收支和储蓄趋势。')}</div></section>`;
+}
+
+function jobFormFacts() {
+  const editing=state.data.jobComparisons?.find((item)=>item.id===state.laborEditingJobId);return {date:localDateKey(),name:'候选工作',candidateBasis:'after-tax',candidateSalary:0,candidateAfterTaxEstimate:0,candidateDays:21.75,candidateDailyHours:8,candidateOvertimeHours:0,candidateCommuteDaily:0,candidateTransport:0,candidateLivingDelta:0,candidateOtherCost:0,note:'',...(editing?.facts||{})};
+}
+
+function laborCurrentJobInput(candidateFacts = {}) {
+  const salary=laborLatest('salaryRecords','periodStart');const living=laborLatest('livingRecords','month');const params=laborParams();
+  return {...candidateFacts,currentIncome:salary?.snapshot?.totalSalary||0,currentWorkHours:salary?.snapshot?.totalWorkHours||0,currentDays:Number(salary?.facts?.normalDays||0),currentCommuteDaily:Number(params.currentCommuteDaily||0),currentSpending:living?.snapshot?.totalSpending||0,currentWorkRelated:living?.snapshot?.workRelated||0};
+}
+
+function jobComparisonHtml(result, hasCandidate = true) {
+  if(!hasCandidate)return '<div class="labor-chart-empty">填写候选工资后显示工作对比结果。</div>';
+  if(!result.comparable)return `<div class="warning"><b>暂不能直接比较：</b>${esc(result.reason)}</div>`;
+  return `<div class="labor-live-summary"><div><span>到手收入差额</span><b>${laborMoney(result.incomeDifference)}</b></div><div><span>月结余差额</span><b>${laborMoney(result.balanceDifference)}</b></div><div><span>占用时间差额</span><b>${laborNumber(result.occupiedHoursDifference)}h</b></div><div><span>每小时可支配差额</span><b>${laborMoney(result.disposableHourlyDifference)}</b></div></div><p class="field-hint">每小时可支配收入 = 扣除月度支出后的结余 ÷ 工作与通勤占用时间。结果依赖输入假设。</p>`;
+}
+
+function laborCareerSection() {
+  const params=laborParams(),latestLiving=laborLatest('livingRecords','month')?.snapshot||{},latestSalary=laborLatest('salaryRecords','periodStart')?.snapshot||{};
+  const targets=salaryTargets({necessaryLiving:latestLiving.necessaryLiving||0,targetSavings:params.targetMonthlySavings,bufferRatio:params.bufferRatio});const facts=jobFormFacts();const comparison=compareJobs(laborCurrentJobInput(facts));const records=laborSort(state.data.jobComparisons,'date').reverse();const signals=decisionSignals({salaryRecords:state.data.salaryRecords,livingRecords:state.data.livingRecords,targets,comparison:records[0]?.snapshot||null});
+  const salaryRecords=laborRangeRecords(laborSort(state.data.salaryRecords,'periodStart'));
+  const livingRecords=laborRangeRecords(laborSort(state.data.livingRecords,'month'));
+  const hasCandidate=Boolean(Number(facts.candidateSalary)||Number(facts.candidateAfterTaxEstimate));
+  return `<section class="labor-section"><div class="labor-section-head"><div><h4>职业选择与目标薪资</h4><p>三条薪资线均为税后到手口径，不直接等同于招聘岗位税前工资。</p></div></div>
+    <div class="labor-target-grid"><article><span>生存线</span><b>${laborMoney(targets.survival)}</b><small>必要生活支出</small></article><article><span>稳定线</span><b>${laborMoney(targets.stable)}</b><small>生活 + 目标储蓄</small></article><article><span>目标线</span><b>${laborMoney(targets.target)}</b><small>稳定线 + 缓冲</small></article></div>
+    <form class="card labor-parameter-form" id="labor-parameters-form"><div class="labor-chart-toolbar"><b>个人计算参数</b><button class="btn" type="submit">保存参数</button></div><div class="labor-form-grid"><label>安全储蓄线（月）<input class="input" name="safetyMonths" type="number" min="0" step="0.5" value="${params.safetyMonths}"></label><label>目标月储蓄<input class="input" name="targetMonthlySavings" type="number" min="0" step="0.01" value="${params.targetMonthlySavings}"></label><label>目标缓冲比例<input class="input" name="bufferRatio" type="number" min="0" max="10" step="0.01" value="${params.bufferRatio}"></label><label>当前日均通勤（小时）<input class="input" name="currentCommuteDaily" type="number" min="0" max="24" step="0.25" value="${params.currentCommuteDaily}"></label></div></form>
+    <div class="card labor-chart-card"><b>当前收入与目标区间</b>${laborChart([{label:'当前到手收入',color:'#245fa8',store:'salaryRecords',points:salaryRecords.map((item)=>({label:laborDateLabel(item.facts),value:item.snapshot?.totalSalary,id:item.id}))},{label:'生存线',color:'#a86100',points:salaryRecords.map((item)=>({label:laborDateLabel(item.facts),value:targets.survival}))},{label:'稳定线',color:'#237a5a',points:salaryRecords.map((item)=>({label:laborDateLabel(item.facts),value:targets.stable}))},{label:'目标线',color:'#e7654f',points:salaryRecords.map((item)=>({label:laborDateLabel(item.facts),value:targets.target}))}],{valueFormatter:laborMoney})}</div>
+    <div class="labor-split-charts"><div class="card labor-chart-card"><b>历史实际时薪</b>${laborChart([{label:'平均实际时薪',color:'#245fa8',store:'salaryRecords',points:salaryRecords.map((item)=>({label:laborDateLabel(item.facts),value:item.snapshot?.averageHourlyRate,id:item.id}))}],{height:220,valueFormatter:laborMoney})}</div><div class="card labor-chart-card"><b>必要生活成本</b>${laborChart([{label:'必要生活费',color:'#e7654f',store:'livingRecords',points:livingRecords.map((item)=>({label:item.facts.month,value:item.snapshot?.necessaryLiving,id:item.id}))}],{height:220,valueFormatter:laborMoney})}</div></div>
+    <div class="labor-signal-list">${signals.length?signals.map((item)=>`<div class="labor-signal ${item.level}">${esc(item.text)}</div>`):'<div class="labor-signal ready">当前数据尚未触发趋势提示；记录更多月份后判断会更可靠。</div>'}</div>
+    <form class="card labor-job-form" id="labor-job-form"><div class="labor-chart-toolbar"><div><b>${state.laborEditingJobId?'编辑候选工作':'比较候选工作'}</b><p>当前工作自动取最近工资与生活记录。</p></div>${state.laborEditingJobId?'<button class="btn" type="button" data-cancel-job-edit>取消编辑</button>':''}</div><div class="labor-form-grid">
+      <label>比较日期<input class="input" type="date" name="date" required value="${esc(facts.date)}"></label><label>候选工作名称<input class="input" name="name" maxlength="100" required value="${esc(facts.name)}"></label><label>工资口径<select class="select" name="candidateBasis"><option value="after-tax" ${facts.candidateBasis==='after-tax'?'selected':''}>税后到手</option><option value="before-tax" ${facts.candidateBasis==='before-tax'?'selected':''}>税前</option></select></label><label>标示月薪<input class="input" type="number" name="candidateSalary" min="0" step="0.01" value="${facts.candidateSalary}"></label><label>税后估算（税前时必填）<input class="input" type="number" name="candidateAfterTaxEstimate" min="0" step="0.01" value="${facts.candidateAfterTaxEstimate}"></label><label>月工作天数<input class="input" type="number" name="candidateDays" min="0" max="366" step="0.25" value="${facts.candidateDays}"></label><label>每天工作小时<input class="input" type="number" name="candidateDailyHours" min="0" max="24" step="0.25" value="${facts.candidateDailyHours}"></label><label>月预计加班小时<input class="input" type="number" name="candidateOvertimeHours" min="0" step="0.25" value="${facts.candidateOvertimeHours}"></label><label>日均通勤小时<input class="input" type="number" name="candidateCommuteDaily" min="0" max="24" step="0.25" value="${facts.candidateCommuteDaily}"></label><label>月交通费<input class="input" type="number" name="candidateTransport" min="0" step="0.01" value="${facts.candidateTransport}"></label><label>生活成本变化<input class="input" type="number" name="candidateLivingDelta" step="0.01" value="${facts.candidateLivingDelta}"></label><label>其他必要支出变化<input class="input" type="number" name="candidateOtherCost" step="0.01" value="${facts.candidateOtherCost}"></label></div><div id="labor-job-preview">${jobComparisonHtml(comparison,hasCandidate)}</div><label>备注<textarea class="textarea" name="note">${esc(facts.note||'')}</textarea></label><button class="btn primary" type="submit">${state.laborEditingJobId?'更新比较记录':'保存比较记录'}</button></form>
+    <div class="labor-history-grid">${records.length?records.map((item)=>`<article class="card labor-history-card"><span>${esc(item.facts.date)} · ${item.facts.candidateBasis==='before-tax'?'税前输入':'税后输入'}</span><h5>${esc(item.facts.name)}</h5><p>${item.snapshot?.comparable?`结余差额 ${laborMoney(item.snapshot.balanceDifference)} · 时间差 ${laborNumber(item.snapshot.occupiedHoursDifference)}h`:`无法直接比较：${esc(item.snapshot?.reason||'口径不一致')}`}</p><div class="row-actions"><button class="btn small" data-edit-job="${esc(item.id)}">编辑</button><button class="btn small danger" data-delete-labor="jobComparisons:${esc(item.id)}">删除</button></div></article>`).join(''):empty('还没有工作比较','填写候选条件并保存，之后可以回看当时的假设与结果。')}</div></section>`;
+}
+
+function laborLifePage() {
+  const latestSalary=laborLatest('salaryRecords','periodStart')?.snapshot||{};const latestLiving=laborLatest('livingRecords','month')?.snapshot||{};
+  const tabs=[['salary','工资记录'],['overtime','加班分析'],['living','生活成本'],['career','职业决策']];
+  const content=state.laborTab==='overtime'?laborOvertimeSection():state.laborTab==='living'?laborLivingSection():state.laborTab==='career'?laborCareerSection():laborSalarySection();
+  return shell(`<section class="page work-page labor-page"><div class="page-head"><div><span class="eyebrow">WORK & LIFE VALUE</span><h3>劳动与生活</h3><p>记录事实、解释计算、观察长期变化；工具提供辅助判断，不替你决定加班或离职。</p></div></div>
+    <div class="labor-kpis"><article><span>最近到手收入</span><b>${laborMoney(latestSalary.totalSalary)}</b><small>${laborLatest('salaryRecords','periodStart')?esc(laborDateLabel(laborLatest('salaryRecords','periodStart').facts)):'暂无记录'}</small></article><article><span>平均实际时薪</span><b>${laborMoney(latestSalary.averageHourlyRate)}</b><small>${Number.isFinite(latestSalary.totalWorkHours)?`${laborNumber(latestSalary.totalWorkHours)} 小时劳动`:'等待工资记录'}</small></article><article><span>最近月度结余</span><b>${laborMoney(latestLiving.monthlyBalance)}</b><small>${Number.isFinite(latestLiving.savingsRate)?`结余率 ${laborPercent(latestLiving.savingsRate)}`:'等待生活记录'}</small></article><article><span>储蓄覆盖</span><b>${Number.isFinite(latestLiving.savingsCoverageMonths)?`${laborNumber(latestLiving.savingsCoverageMonths)} 月`:'—'}</b><small>按必要生活费估算</small></article></div>
+    <div class="labor-tabs-row"><div class="segment-control labor-tabs">${tabs.map(([key,label])=>`<button class="${state.laborTab===key?'active':''}" data-labor-tab="${key}">${label}</button>`).join('')}</div><label class="labor-history-range">图表范围<select class="select compact" id="labor-history-range"><option value="all" ${state.laborRange==='all'?'selected':''}>全部记录</option><option value="6" ${state.laborRange==='6'?'selected':''}>最近 6 期</option><option value="12" ${state.laborRange==='12'?'selected':''}>最近 12 期</option></select></label></div>${content}</section>`,'劳动与生活','收入、时间、生活成本与职业选择');
 }
 
 function taskList() {
@@ -802,6 +932,8 @@ function renderDrawer() {
   if (d.type === 'handoff') { const t=state.data.tasks.find((x)=>x.id===state.taskId); const available=state.data.team.some((m)=>!isCurrentOwner(t,m)); title='交接任务'; submit='确认交接'; body=`<div class="handoff-flow"><div class="active"><b>1</b><span>当前负责人</span></div><i>↓</i><div><b>2</b><span>接手人</span></div><i>↓</i><div><b>3</b><span>确认交接</span></div></div><div class="field"><label>当前负责人</label><input class="input" value="${esc(t.ownerName||'未分配')}" disabled></div><div class="field"><label>接手人 <span>*</span></label><select class="select" name="toId" id="handoff-to" required ${available?'':'disabled'}>${handoffMemberOptions(t)}</select>${available?'':'<div class="field-hint error-text">Team 中没有其他可接手的成员，请先到 Settings 添加成员。</div>'}</div><div class="field"><label>交接说明</label><textarea class="textarea" name="note" placeholder="交接背景、注意事项或待处理内容"></textarea></div><div class="handoff-confirm" id="handoff-confirm">请选择接手人。确认时会保存当时任务状态和最新进展快照；完成状态不会改变。</div>`; }
   if (d.type === 'new-radar-profile' || d.type === 'edit-radar-profile') { const profile=d.type==='edit-radar-profile'?(state.radarProfiles.find((item)=>item.id===d.id)||activeRadarProfile()):null; const editing=Boolean(profile); title=editing?'编辑探索方向':'新建探索方向'; submit=editing?'保存配置':'创建方向'; body=`<div class="field"><label>方向名称 <span>*</span></label><input class="input" name="name" required maxlength="60" value="${esc(profile?.name||'')}" ${profile?.isDefault?'readonly':''}></div><div class="field"><label>核心领域</label><textarea class="textarea" name="coreDomains" placeholder="每行填写一个领域">${esc((profile?.coreDomains||[]).join('\n'))}</textarea><div class="field-hint">演示提供方目前支持：AI Engineering、Personal Productivity、Knowledge Management。</div></div><div class="field"><label>相邻领域</label><textarea class="textarea" name="adjacentDomains" placeholder="每行填写一个领域">${esc((profile?.adjacentDomains||[]).join('\n'))}</textarea><div class="field-hint">演示提供方目前支持：Learning Science、Behavioral Science、Product Design。</div></div><div class="warning">修改配置不会清除当前批次；下一次 Explore New 才会按新配置查找演示候选。Unknown Window 始终保持开放。</div>`; }
   if (d.type === 'new-member' || d.type === 'edit-member') { const m=state.data.team.find((x)=>x.id===d.id); title=d.type==='new-member'?'添加成员':'编辑成员'; submit='保存成员'; body=`<div class="field"><label>Name <span>*</span></label><input class="input" name="name" required value="${esc(m?.name||'')}"></div><div class="field"><label>Email <span>*</span></label><input class="input" name="email" type="email" required value="${esc(m?.email||'')}"></div>`; }
+  if (d.type === 'new-salary' || d.type === 'edit-salary') { const item=state.data.salaryRecords.find((entry)=>entry.id===d.id);const f=item?.facts||{};const today=localDateKey();const monthStart=`${today.slice(0,7)}-01`;title=item?'编辑工资记录':'新增工资记录';submit='保存工资记录';const overtimeField=(key,label)=>`<div class="two-col"><div class="field"><label>${label}</label><input class="input" type="number" name="${key}Value" min="0" step="0.25" value="${f[`${key}Value`]??0}"></div><div class="field"><label>单位</label><select class="select" name="${key}Unit"><option value="hours" ${f[`${key}Unit`]!=='days'?'selected':''}>小时</option><option value="days" ${f[`${key}Unit`]==='days'?'selected':''}>天</option></select></div></div>`;body=`<div class="two-col"><div class="field"><label>开始日期 <span>*</span></label><input class="input" type="date" name="periodStart" required value="${esc(f.periodStart||monthStart)}"></div><div class="field"><label>结束日期 <span>*</span></label><input class="input" type="date" name="periodEnd" required value="${esc(f.periodEnd||today)}"></div></div><div class="field"><label>实际总工资（税后到手）<span>*</span></label><input class="input" type="number" name="totalSalary" min="0" step="0.01" required value="${f.totalSalary??''}"><div class="field-hint">默认已经包含加班、奖金、补贴并扣除扣款；下面的调整项不会再次加总。</div></div><div class="two-col"><div class="field"><label>正常工作天数 <span>*</span></label><input class="input" type="number" name="normalDays" min="0" max="366" step="0.25" required value="${f.normalDays??21.75}"></div><div class="field"><label>每天正常工时 <span>*</span></label><input class="input" type="number" name="dailyHours" min="0" max="24" step="0.25" required value="${f.dailyHours??8}"></div></div>${overtimeField('overtime15','1.5 倍额外加班')}${overtimeField('overtime20','2 倍额外加班')}${overtimeField('overtime30','3 倍额外加班')}<div class="warning">正常工作天数只记录正常工时。已计入正常天数的休息日工作，请先从正常工时中拆出，再填入对应加班，避免重复计数。</div><details><summary>奖金、补贴与扣款</summary><div class="labor-form-grid"><label>奖金<input class="input" type="number" name="bonus" min="0" step="0.01" value="${f.bonus??0}"></label><label>补贴<input class="input" type="number" name="allowance" min="0" step="0.01" value="${f.allowance??0}"></label><label>扣款<input class="input" type="number" name="deductions" min="0" step="0.01" value="${f.deductions??0}"></label></div></details><div class="field"><label>备注</label><textarea class="textarea" name="note">${esc(f.note||'')}</textarea></div>`; }
+  if (d.type === 'new-living' || d.type === 'edit-living') { const item=state.data.livingRecords.find((entry)=>entry.id===d.id);const f=item?.facts||{};const latestSalary=laborLatest('salaryRecords','periodStart')?.snapshot?.totalSalary||0;title=item?'编辑生活成本记录':'新增生活成本记录';submit='保存生活记录';const cost=(name,label)=>`<label>${label}<input class="input" type="number" name="${name}" min="0" step="0.01" value="${f[name]??0}"></label>`;body=`<div class="two-col"><div class="field"><label>月份 <span>*</span></label><input class="input" type="month" name="month" required value="${esc(f.month||localDateKey().slice(0,7))}"></div><div class="field"><label>实际到手收入</label><input class="input" type="number" name="actualIncome" min="0" step="0.01" value="${f.actualIncome??latestSalary}"></div></div><h5>普通生活支出</h5><div class="labor-form-grid">${cost('rent','房租与居住')}${cost('food','饮食')}${cost('transport','普通交通')}${cost('utilities','水电、网络、通信')}${cost('dailyNeeds','日常起居')}${cost('otherNecessary','其他必要支出')}${cost('nonEssential','非必要消费')}${cost('oneTime','一次性大额支出')}</div><h5>工作与储蓄</h5><div class="labor-form-grid">${cost('workRelated','工作相关增量支出')}${cost('availableSavings','当前可用储蓄')}</div><div class="warning">工作增量支出只填写“因为这份工作才新增”的费用；已经记入普通交通、居住或饮食的同一笔钱不要重复填写。</div><div class="field"><label>备注</label><textarea class="textarea" name="note">${esc(f.note||'')}</textarea></div>`; }
   if (d.type === 'new-classification' || d.type === 'edit-classification') { const item=classificationItems(d.kind).find((entry)=>entry.id===d.id); const label=d.kind==='contentTypes'?'内容类型':'主题分类'; title=d.type==='new-classification'?`新增${label}`:`重命名${label}`; submit=d.type==='new-classification'?'新增分类':'保存名称'; body=`<div class="field"><label>显示名称 <span>*</span></label><input class="input" name="label" maxlength="60" required autofocus value="${esc(item?.label||'')}"></div><div class="warning">分类关联使用不可变的稳定 ID。重命名只改变显示名称，不会中断已有笔记关联。</div>`; }
   if (d.type === 'delete-classification') { const item=classificationItems(d.kind).find((entry)=>entry.id===d.id); const count=classificationReferenceCount(d.kind,d.id); const label=d.kind==='contentTypes'?'内容类型':'主题分类'; title=`删除${label}`; submit=count?'迁移并删除':'确认删除'; const options=d.kind==='contentTypes'?contentTypeOptions('',d.id):categoryOptions('',d.id); body=`<div class="warning"><b>将删除“${esc(item?.label||'')}”</b><br>${count?`当前可访问的数据源有 ${count} 条笔记引用，必须先迁移到其他分类。`:'当前可访问的数据源没有引用；删除后本地配置将不再显示此分类。'}</div>${count?`<div class="field"><label>迁移到 <span>*</span></label><select class="select" name="replacementId" required><option value="">请选择目标分类</option>${options}</select></div>`:''}<p class="field-hint">若不可访问的另一数据源仍存在相同分类，重新连接时会从笔记元数据安全恢复，不会删除笔记正文。</p>`; }
   return `<div class="drawer-backdrop"><form class="drawer" id="drawer-form"><header class="drawer-head"><h3>${title}</h3><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></header><div class="drawer-body">${body}</div><footer class="drawer-foot"><button type="button" class="btn" data-close>取消</button><button class="btn primary" type="submit">${submit}</button></footer></form></div>`;
@@ -818,6 +950,7 @@ function render() {
   if (state.route === 'radar') app.innerHTML = radarPage();
   if (state.route === 'tasks') app.innerHTML = taskList();
   if (state.route === 'task-detail') app.innerHTML = taskDetail();
+  if (state.route === 'labor-life') app.innerHTML = laborLifePage();
   if (state.route === 'notes') app.innerHTML = notesPage();
   if (state.route === 'categories') app.innerHTML = categoriesPage();
   if (state.route === 'settings') app.innerHTML = settingsPage();
@@ -837,7 +970,7 @@ function confirmEditorExit() {
 }
 
 function markTransientEditorDirty(target) {
-  const form=target.closest?.('#drawer-form,#capture-form,#home-capture-form,#todo-quick-form');
+  const form=target.closest?.('#drawer-form,#capture-form,#home-capture-form,#todo-quick-form,#labor-overtime-form,#labor-forecast-form,#labor-parameters-form,#labor-job-form');
   if (!form) return;
   if (form.id==='drawer-form' && state.drawer) state.drawer.dirty=true;
   else transientDirtyForms.add(form.id);
@@ -931,6 +1064,8 @@ async function onSubmit(form) {
     state.radarMessage=''; state.drawer=null; await refresh(old?'探索方向已更新；当前批次保持不变':'探索方向已创建');
   }
   if (d.type === 'new-member' || d.type === 'edit-member') { const old=state.data.team.find((x)=>x.id===d.id); const m={id:old?.id||uid('member'),name:fd.get('name').trim(),email:fd.get('email').trim(),createdAt:old?.createdAt||timestamp,updatedAt:timestamp}; await storage.put('team',m); state.drawer=null; await refresh('成员已保存；历史名称保持不变'); }
+  if (d.type === 'new-salary' || d.type === 'edit-salary') { const old=state.data.salaryRecords.find((item)=>item.id===d.id);const facts={periodStart:String(fd.get('periodStart')||''),periodEnd:String(fd.get('periodEnd')||''),totalSalary:Number(fd.get('totalSalary')),normalDays:Number(fd.get('normalDays')),dailyHours:Number(fd.get('dailyHours')),overtime15Value:Number(fd.get('overtime15Value')||0),overtime15Unit:String(fd.get('overtime15Unit')||'hours'),overtime20Value:Number(fd.get('overtime20Value')||0),overtime20Unit:String(fd.get('overtime20Unit')||'hours'),overtime30Value:Number(fd.get('overtime30Value')||0),overtime30Unit:String(fd.get('overtime30Unit')||'hours'),bonus:Number(fd.get('bonus')||0),allowance:Number(fd.get('allowance')||0),deductions:Number(fd.get('deductions')||0),note:String(fd.get('note')||'').trim()};if(!facts.periodStart||!facts.periodEnd||facts.periodEnd<facts.periodStart)throw new Error('请填写有效的统计日期范围');const snapshot=calculateSalary(facts);await storage.put('salaryRecords',{id:old?.id||uid('salary'),facts,snapshot,createdAt:old?.createdAt||timestamp,updatedAt:timestamp});state.drawer=null;await refresh(old?'工资记录已更新并重新计算':'工资记录已保存'); }
+  if (d.type === 'new-living' || d.type === 'edit-living') { const old=state.data.livingRecords.find((item)=>item.id===d.id);const numeric=['actualIncome','rent','food','transport','utilities','dailyNeeds','otherNecessary','nonEssential','oneTime','workRelated','availableSavings'];const facts={month:String(fd.get('month')||''),note:String(fd.get('note')||'').trim(),...Object.fromEntries(numeric.map((key)=>[key,Number(fd.get(key)||0)]))};if(!/^\d{4}-\d{2}$/.test(facts.month))throw new Error('请选择有效月份');const snapshot=calculateLiving(facts);await storage.put('livingRecords',{id:old?.id||uid('living'),facts,snapshot,createdAt:old?.createdAt||timestamp,updatedAt:timestamp});state.drawer=null;await refresh(old?'生活记录已更新并重新计算':'生活记录已保存'); }
   if (d.type === 'new-classification') { state.classifications=classificationStore.add(state.classifications,d.kind,fd.get('label'));state.drawer=null;render();toast('分类已新增；未被 Memos 笔记引用前仅保存在当前浏览器'); }
   if (d.type === 'edit-classification') { const label=String(fd.get('label')||'').trim().replace(/\s+/g,' ').slice(0,60);if(!label)throw new Error('名称不能为空');if(classificationItems(d.kind).some((item)=>item.id!==d.id&&item.label.toLocaleLowerCase()===label.toLocaleLowerCase()))throw new Error('已存在同名分类');await updateClassificationReferences(d.kind,d.id,d.id,label);state.classifications=classificationStore.rename(state.classifications,d.kind,d.id,label);state.drawer=null;await refresh('分类名称已更新，稳定 ID 与笔记关联保持不变'); }
   if (d.type === 'delete-classification') { const count=classificationReferenceCount(d.kind,d.id);const replacementId=String(fd.get('replacementId')||'');if(count&&!replacementId){toast('请选择迁移目标','error');return;}let changed=0;if(replacementId){const replacement=classificationItems(d.kind).find((item)=>item.id===replacementId);if(!replacement)throw new Error('迁移目标不存在');changed=await updateClassificationReferences(d.kind,d.id,replacement.id,replacement.label);}state.classifications=classificationStore.remove(state.classifications,d.kind,d.id);if(d.kind==='contentTypes'&&state.categoryType===d.id)state.categoryType='All';if(d.kind==='categories'&&state.selectedCategory===d.id)state.selectedCategory='All';state.drawer=null;await refresh(changed?`已迁移 ${changed} 条笔记并删除分类`:'分类已删除'); }
@@ -1115,10 +1250,53 @@ async function deleteRadarProfile(profileId) {
   await refresh(`自定义探索方向、当前批次及 ${historyCount} 条历史已删除`);
 }
 
+function laborFormFacts(form, names) {
+  const fd=new FormData(form);return Object.fromEntries(names.map((name)=>[name,fd.get(name)]));
+}
+
+function readOvertimeForm(form) {
+  const facts=laborFormFacts(form,['date','scenario','baseHourlyRate','multiplier','durationValue','durationUnit','dailyHours','fixedCost','variableCostPerHour','commuteHours','restValuePerHour','fatigueCoefficient','maxHours','note']);
+  ['baseHourlyRate','multiplier','durationValue','dailyHours','fixedCost','variableCostPerHour','commuteHours','restValuePerHour','fatigueCoefficient','maxHours'].forEach((key)=>facts[key]=Number(facts[key]||0));return facts;
+}
+
+function updateOvertimePreview(form) {
+  const preview=form.querySelector('#labor-overtime-preview');if(!preview)return;
+  try{const metric=form.elements.metric?.value||'comprehensiveValue';state.laborOvertimeMetric=metric;preview.innerHTML=overtimeAnalysisHtml(analyzeOvertime(readOvertimeForm(form)),metric);}catch(error){preview.innerHTML=`<div class="warning">${esc(error.message)}</div>`;}
+}
+
+function readForecastForm(form) {
+  const facts=laborFormFacts(form,['startSavings','monthlyIncome','monthlySpending','necessaryLiving','safetyMonths','months','annualIncomeGrowth','annualSpendingGrowth']);Object.keys(facts).forEach((key)=>facts[key]=Number(facts[key]||0));return facts;
+}
+
+function updateForecastPreview(form) {
+  const preview=form.querySelector('#labor-forecast-preview');if(!preview)return;try{preview.innerHTML=forecastHtml(readForecastForm(form));}catch(error){preview.innerHTML=`<div class="warning">${esc(error.message)}</div>`;}
+}
+
+function readJobForm(form) {
+  const facts=laborFormFacts(form,['date','name','candidateBasis','candidateSalary','candidateAfterTaxEstimate','candidateDays','candidateDailyHours','candidateOvertimeHours','candidateCommuteDaily','candidateTransport','candidateLivingDelta','candidateOtherCost','note']);['candidateSalary','candidateAfterTaxEstimate','candidateDays','candidateDailyHours','candidateOvertimeHours','candidateCommuteDaily','candidateTransport','candidateLivingDelta','candidateOtherCost'].forEach((key)=>facts[key]=Number(facts[key]||0));facts.name=String(facts.name||'').trim();facts.note=String(facts.note||'').trim();return facts;
+}
+
+function updateJobPreview(form) {
+  const preview=form.querySelector('#labor-job-preview');if(!preview)return;try{const facts=readJobForm(form);const hasCandidate=Boolean(facts.candidateSalary||facts.candidateAfterTaxEstimate);preview.innerHTML=jobComparisonHtml(compareJobs(laborCurrentJobInput(facts)),hasCandidate);}catch(error){preview.innerHTML=`<div class="warning">${esc(error.message)}</div>`;}
+}
+
+async function saveLaborParameters(patch, message='计算参数已保存') {
+  const timestamp=now();const old=state.data.laborParameters.find((item)=>item.id==='default');const facts={...(old?.facts||{}),...patch};await storage.put('laborParameters',{id:'default',facts,createdAt:old?.createdAt||timestamp,updatedAt:timestamp});transientDirtyForms.delete('labor-parameters-form');transientDirtyForms.delete('labor-forecast-form');await refresh(message);
+}
+
 app.addEventListener('click', async (e) => {
   try {
   const navGroup=e.target.closest('[data-nav-group]'); if(navGroup){if(!confirmEditorExit())return;const group=navGroup.dataset.navGroup;state.openNavGroup=state.openNavGroup===group?null:group;render();document.querySelector(`[data-nav-group="${group}"]`)?.focus();return;}
   const nav=e.target.closest('[data-nav]'); if(nav){if(!confirmEditorExit())return;if(state.route==='notes')await flushNoteDraft();persistNotesUi(nav.dataset.nav==='notes');state.route=nav.dataset.nav;if(PERSONAL_ROUTES.has(state.route))state.openNavGroup='personal';if(state.route==='playground')state.playgroundView='list';state.search='';state.drawer=null;render();window.scrollTo({top:0});return;}
+  const laborTab=e.target.closest('[data-labor-tab]');if(laborTab){if(!confirmEditorExit())return;state.laborTab=laborTab.dataset.laborTab;state.laborEditingOvertimeId=null;state.laborEditingJobId=null;render();return;}
+  const laborPoint=e.target.closest('[data-labor-record]');if(laborPoint){const store=laborPoint.dataset.laborStore;if(store==='salaryRecords')openDrawer('edit-salary',laborPoint.dataset.laborRecord);if(store==='livingRecords')openDrawer('edit-living',laborPoint.dataset.laborRecord);return;}
+  const editSalary=e.target.closest('[data-edit-salary]');if(editSalary){openDrawer('edit-salary',editSalary.dataset.editSalary);return;}
+  const editLiving=e.target.closest('[data-edit-living]');if(editLiving){openDrawer('edit-living',editLiving.dataset.editLiving);return;}
+  const editOvertime=e.target.closest('[data-edit-overtime]');if(editOvertime){if(!confirmEditorExit())return;state.laborEditingOvertimeId=editOvertime.dataset.editOvertime;render();return;}
+  if(e.target.closest('[data-cancel-overtime-edit]')){if(!confirmEditorExit())return;state.laborEditingOvertimeId=null;render();return;}
+  const editJob=e.target.closest('[data-edit-job]');if(editJob){if(!confirmEditorExit())return;state.laborEditingJobId=editJob.dataset.editJob;render();return;}
+  if(e.target.closest('[data-cancel-job-edit]')){if(!confirmEditorExit())return;state.laborEditingJobId=null;render();return;}
+  const deleteLabor=e.target.closest('[data-delete-labor]');if(deleteLabor){const [store,id]=deleteLabor.dataset.deleteLabor.split(':');const allowed=new Set(['salaryRecords','overtimeDecisions','livingRecords','jobComparisons']);if(!allowed.has(store))throw new Error('未知记录类型');if(confirm('确定删除这条劳动与生活记录吗？原始事实与计算快照都会删除。')){await storage.delete(store,id);if(state.laborEditingOvertimeId===id)state.laborEditingOvertimeId=null;if(state.laborEditingJobId===id)state.laborEditingJobId=null;await refresh('记录已删除');}return;}
   const openArtwork=e.target.closest('[data-playground-open]'); if(openArtwork){state.playgroundView=openArtwork.dataset.playgroundOpen;render();window.scrollTo({top:0});return;}
   if(e.target.closest('[data-playground-back]')){state.playgroundView='list';render();window.scrollTo({top:0});return;}
   const retryArtwork=e.target.closest('[data-playground-retry]'); if(retryArtwork){mountArtwork(retryArtwork.dataset.playgroundRetry);return;}
@@ -1184,11 +1362,15 @@ app.addEventListener('click', async (e) => {
 });
 
 app.addEventListener('submit', async (e) => {
-  if(!['drawer-form','note-editor-form','capture-form','home-capture-form','todo-quick-form'].includes(e.target.id))return;
+  if(!['drawer-form','note-editor-form','capture-form','home-capture-form','todo-quick-form','labor-overtime-form','labor-forecast-form','labor-parameters-form','labor-job-form'].includes(e.target.id))return;
   e.preventDefault();
   try {
     if(e.target.id==='drawer-form'){await onSubmit(e.target);if(!state.drawer)transientDirtyForms.delete(e.target.id);}
     else if(e.target.id==='note-editor-form')await saveNoteForm(e.target);
+    else if(e.target.id==='labor-overtime-form'){const facts=readOvertimeForm(e.target);if(!facts.date)throw new Error('请选择决策日期');const snapshot=analyzeOvertime(facts);const old=state.data.overtimeDecisions.find((item)=>item.id===state.laborEditingOvertimeId);const timestamp=now();await storage.put('overtimeDecisions',{id:old?.id||uid('overtime'),facts,snapshot,createdAt:old?.createdAt||timestamp,updatedAt:timestamp});transientDirtyForms.delete(e.target.id);state.laborEditingOvertimeId=null;await refresh(old?'加班决策已更新':'加班决策已保存');}
+    else if(e.target.id==='labor-forecast-form'){const facts=readForecastForm(e.target);forecastSavings(facts);await saveLaborParameters({forecastStartSavings:facts.startSavings,forecastMonthlyIncome:facts.monthlyIncome,forecastMonthlySpending:facts.monthlySpending,forecastNecessaryLiving:facts.necessaryLiving,safetyMonths:facts.safetyMonths,forecastMonths:facts.months,annualIncomeGrowth:facts.annualIncomeGrowth,annualSpendingGrowth:facts.annualSpendingGrowth},'预测假设已保存');}
+    else if(e.target.id==='labor-parameters-form'){const fd=new FormData(e.target);const patch={safetyMonths:Number(fd.get('safetyMonths')||0),targetMonthlySavings:Number(fd.get('targetMonthlySavings')||0),bufferRatio:Number(fd.get('bufferRatio')||0),currentCommuteDaily:Number(fd.get('currentCommuteDaily')||0)};salaryTargets({necessaryLiving:0,targetSavings:patch.targetMonthlySavings,bufferRatio:patch.bufferRatio});if(patch.safetyMonths<0||patch.currentCommuteDaily<0||patch.currentCommuteDaily>24)throw new Error('个人参数超出有效范围');await saveLaborParameters(patch);}
+    else if(e.target.id==='labor-job-form'){const facts=readJobForm(e.target);if(!facts.date||!facts.name)throw new Error('请填写比较日期和候选工作名称');const snapshot=compareJobs(laborCurrentJobInput(facts));const old=state.data.jobComparisons.find((item)=>item.id===state.laborEditingJobId);const timestamp=now();await storage.put('jobComparisons',{id:old?.id||uid('job'),facts,snapshot,createdAt:old?.createdAt||timestamp,updatedAt:timestamp});transientDirtyForms.delete(e.target.id);state.laborEditingJobId=null;await refresh(old?'工作比较已更新':'工作比较已保存');}
     else if(['capture-form','home-capture-form'].includes(e.target.id)){const content=String(new FormData(e.target).get('content')||'').trim();if(!content)throw new Error('暂存内容不能为空');const timestamp=now();await storage.put('captures',{id:uid('capture'),content,status:'pending',convertedTodoId:'',createdAt:timestamp,updatedAt:timestamp,completedAt:''});transientDirtyForms.delete(e.target.id);e.target.reset();await refresh('已保存到临时暂存');}
     else {const title=String(new FormData(e.target).get('title')||'').trim();if(!title)throw new Error('待办内容不能为空');const timestamp=now();await storage.put('todos',{id:uid('todo'),title,notes:'',plannedDate:'',dueDate:'',remindAt:'',status:'pending',sourceCaptureId:'',createdAt:timestamp,updatedAt:timestamp,completedAt:''});transientDirtyForms.delete(e.target.id);e.target.reset();await refresh('个人待办已添加');}
   } catch(error){toast(error.message || '保存失败','error');}
@@ -1204,6 +1386,9 @@ app.addEventListener('compositionend',(e)=>{if(composingSearches.delete(e.target
 app.addEventListener('input', (e) => {
   const editor=e.target.closest('#note-editor-form'); if(editor){scheduleNoteDraft(editor);return;}
   markTransientEditorDirty(e.target);
+  const overtimeForm=e.target.closest('#labor-overtime-form');if(overtimeForm){if(e.target.matches('[data-overtime-range]')){overtimeForm.elements.durationValue.value=e.target.value;overtimeForm.elements.durationUnit.value='hours';}updateOvertimePreview(overtimeForm);return;}
+  const forecastForm=e.target.closest('#labor-forecast-form');if(forecastForm){updateForecastPreview(forecastForm);return;}
+  const jobForm=e.target.closest('#labor-job-form');if(jobForm){updateJobPreview(jobForm);return;}
   if(composingSearches.has(e.target.id)||e.isComposing)return;
   if(applySearchInput(e.target))return;
   if(e.target.matches('[data-template-variable]')){state.templateValues[e.target.dataset.templateVariable]=e.target.value;const template=state.data.templates.find((item)=>item.id===state.templateId);const preview=document.querySelector('#template-preview');if(template&&preview)preview.textContent=fillTemplate(template.content,state.templateValues);return;}
@@ -1218,6 +1403,11 @@ app.addEventListener('input', (e) => {
 app.addEventListener('change', async (e) => {
   const editor=e.target.closest('#note-editor-form'); if(editor){scheduleNoteDraft(editor);return;}
   markTransientEditorDirty(e.target);
+  const overtimeForm=e.target.closest('#labor-overtime-form');if(overtimeForm){updateOvertimePreview(overtimeForm);return;}
+  const forecastForm=e.target.closest('#labor-forecast-form');if(forecastForm){updateForecastPreview(forecastForm);return;}
+  const jobForm=e.target.closest('#labor-job-form');if(jobForm){updateJobPreview(jobForm);return;}
+  if(e.target.id==='labor-history-range'){state.laborRange=e.target.value;render();return;}
+  if(e.target.id==='labor-trend-metric'){state.laborTrendMetric=e.target.value;render();return;}
   if(e.target.id==='status-filter'){state.status=e.target.value;render();}
   if(e.target.id==='template-category'){state.templateCategory=e.target.value;state.templateId=null;state.templateValues={};render();}
   if(e.target.id==='template-favorites'){state.templateFavorites=e.target.checked;state.templateId=null;state.templateValues={};render();}
