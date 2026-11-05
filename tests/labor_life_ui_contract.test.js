@@ -12,6 +12,12 @@ for(const tab of ['salary','overtime','living','career'])assert(app.includes(`['
 for(const store of ['salaryRecords','overtimeDecisions','livingRecords','laborParameters','jobComparisons'])assert(storage.includes(`'${store}'`),`storage includes ${store}`);
 assert(app.includes('facts,snapshot'),'records separate facts and calculation snapshots');
 assert(app.includes('id="labor-overtime-form"'),'overtime curve has live input form');
+assert(app.includes('step="0.5"')&&app.includes('data-overtime-range'),'overtime duration uses synchronized half-hour controls');
+assert(app.includes('data-overtime-rate'),'all three hourly multiplier cards update with the base rate');
+for(const field of ['taxiCost','mealCost','nightSubsidyMode','nightSubsidyAmount','customAmount'])assert(app.includes(field),`overtime V1 exposes ${field}`);
+assert(app.includes('overtimeSvgChart(mainSeries,analysis)'),'overtime preview uses a multi-series cumulative chart');
+assert(app.includes('overtimeSvgChart(rateSeries,analysis,{rate:true})'),'overtime preview includes a discrete rate chart');
+assert(app.includes('allPositiveHoursNegative'),'negative scenarios explicitly preserve the no-overtime recommendation');
 assert(app.includes('id="labor-forecast-form"'),'savings forecast has adjustable assumptions');
 assert(app.includes('candidateBasis'),'job comparison preserves salary basis');
 assert(app.includes('id="labor-history-range"'),'historical charts expose a time-range filter');

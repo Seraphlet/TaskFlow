@@ -1018,6 +1018,44 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .labor-history-heading h5 { margin: 4px 0 0; font-size: 17px; }
 .labor-history-heading p { margin: 0; color: #64748b; font-size: 12px; }
 .legacy-mark { display: block; width: fit-content; margin-top: 4px; padding: 2px 5px; border-radius: 5px; color: #7c5a19; background: #fff2cf; font-size: 10px; }
+.overtime-v1 { gap: 14px; }
+.overtime-control-section { display: grid; gap: 12px; padding: 4px 0 16px; border-bottom: 1px solid #e2e6ed; }
+.overtime-section-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.overtime-section-head > span { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #526780; font-size: 12px; font-weight: 800; }
+.overtime-section-head > div { min-width: 0; display: grid; gap: 2px; }
+.overtime-section-head b { color: #1e293b; }
+.overtime-section-head small { color: #64748b; line-height: 1.45; }
+.overtime-section-head > .btn { margin-left: auto; }
+.labor-form-grid.compact { grid-template-columns: repeat(2,minmax(150px,280px)); }
+.overtime-rate-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.overtime-rate { padding: 11px 13px; border: 1px solid #dce2ea; border-radius: 9px; background: #f9fafc; }
+.overtime-rate.active { border-color: #9fb0c5; background: #eef2f7; box-shadow: inset 3px 0 #526780; }
+.overtime-rate span,.overtime-rate b { display: block; }
+.overtime-rate span { color: #64748b; font-size: 11px; }
+.overtime-rate b { margin-top: 4px; color: #27384c; font-size: 16px; }
+.overtime-duration { display: grid; grid-template-columns: minmax(0,1fr) 150px; align-items: center; gap: 18px; }
+.overtime-duration > input { width: 100%; accent-color: #526780; }
+.overtime-duration label { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 7px; color: #64748b; }
+.overtime-expense-list { display: grid; gap: 8px; }
+.overtime-expense-row { display: grid; grid-template-columns: minmax(160px,1fr) minmax(120px,.45fr) auto; align-items: end; gap: 8px; }
+.overtime-expense-row label { display: grid; gap: 5px; color: #64748b; font-size: 12px; font-weight: 700; }
+.overtime-expense-empty { margin: 0; padding: 8px 0; }
+.overtime-summary { grid-template-columns: repeat(5,minmax(0,1fr)); }
+.overtime-chart-block { display: grid; gap: 8px; padding-top: 8px; }
+.overtime-chart-block.compact { padding-top: 2px; }
+.overtime-chart .overtime-zero-line { stroke: #8793a3; stroke-width: 1; stroke-dasharray: 4 4; }
+.overtime-chart .overtime-current-line { stroke: #526780; stroke-width: 1.5; stroke-dasharray: 3 3; }
+.overtime-current-label { fill: #526780; font-size: 10px; font-weight: 800; }
+.overtime-chart .overtime-optimal { fill: #fff; stroke: #e7654f; stroke-width: 3; }
+.overtime-chart .overtime-crossing { fill: rgba(82,103,128,.08); }
+.overtime-chart .overtime-jump { stroke: #7b61a8; stroke-width: 2; stroke-dasharray: 2 2; }
+.labor-chart-legend .zero { border-top: 1px dashed #8793a3; background: transparent; }
+.overtime-decision { display: flex; align-items: flex-start; gap: 8px; }
+.overtime-decision span { color: #665525; }
+.overtime-nodes { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.overtime-save-row { display: grid; grid-template-columns: minmax(150px,.35fr) minmax(260px,1fr) auto; align-items: end; gap: 12px; padding-top: 14px; border-top: 1px solid #e2e6ed; }
+.overtime-save-row label { display: grid; gap: 6px; color: #64748b; font-size: 12px; font-weight: 700; }
+.overtime-save-row .textarea { min-height: 76px; }
 
 .drawer:not(.route-home):not(.route-playground) { background: rgba(255,255,255,.95); border-left: 1px solid rgba(226,230,237,.9); box-shadow: -22px 0 64px rgba(51,65,85,.17); backdrop-filter: blur(20px) saturate(1.06); }
 .drawer:not(.route-home):not(.route-playground) .btn { min-height: 38px; padding: 8px 13px; border: 1px solid #d5dce6; border-radius: 7px; color: #334155; background: #fff; box-shadow: 0 1px 2px rgba(51,65,85,.04); }
@@ -1059,6 +1097,9 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .radar-workspace,.settings-workspace { grid-template-columns: 1fr; }
   .radar-direction-sidebar,.settings-sidebar { position: static; max-height: none; }
   .radar-workspace.content-sidebar-collapsed,.settings-workspace.content-sidebar-collapsed { grid-template-columns: 0 38px minmax(0,1fr); }
+  .overtime-summary { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .overtime-save-row { grid-template-columns: 1fr 1fr; }
+  .overtime-save-row .btn { grid-column: 2; }
 }
 @media (max-width: 560px) {
   .content-sidebar-layout:not(.content-sidebar-collapsed) { grid-template-columns: 1fr; }
@@ -1066,6 +1107,11 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .content-sidebar-collapsed > .content-sidebar-toggle { margin-bottom: 8px; }
   .labor-history-heading { align-items: flex-start; flex-direction: column; }
   .drawer-facts div { grid-template-columns: 1fr; gap: 3px; }
+  .labor-form-grid.compact,.overtime-rate-grid,.overtime-summary,.overtime-nodes,.overtime-save-row { grid-template-columns: 1fr; }
+  .overtime-duration,.overtime-expense-row { grid-template-columns: 1fr; }
+  .overtime-section-head { align-items: flex-start; flex-wrap: wrap; }
+  .overtime-section-head > .btn { width: 100%; margin-left: 36px; }
+  .overtime-save-row .btn { grid-column: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-shell:not(.home-shell):not(.playground-shell),.module-content-sidebar { transition: none; }

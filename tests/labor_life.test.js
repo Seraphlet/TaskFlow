@@ -35,6 +35,33 @@ assert.strictEqual(overtime.selected.cashNetValue,280);
 assert.strictEqual(overtime.selected.comprehensiveValue,136);
 assert(overtime.nodes.optimal.hours>=0&&overtime.nodes.optimal.hours<=12);
 
+for(const multiplier of [1.5,2,3]){
+  const result=api.analyzeOvertime({overtimeVersion:2,baseHourlyRate:40,multiplier,durationValue:1,maxHours:4});
+  assert.strictEqual(result.selected.overtimeWage,40*multiplier,`${multiplier}x overtime wage is correct`);
+}
+const overtimeV2=api.analyzeOvertime({overtimeVersion:2,baseHourlyRate:50,multiplier:2,durationValue:2,taxiCost:30,mealCost:20,customExpenses:[{name:'额外饮料',amount:10},{name:'节省娱乐',amount:-15}],nightSubsidyMode:'fixed',nightSubsidyAmount:25,restValuePerHour:10,fatigueCoefficient:2,maxHours:6});
+assert.strictEqual(overtimeV2.formulaVersion,2);
+assert.strictEqual(overtimeV2.points[0].totalOvertimeIncome,0,'zero hours never earns subsidy');
+assert.strictEqual(overtimeV2.points[0].fixedCost,0,'zero hours never incurs one-time costs');
+assert.strictEqual(overtimeV2.selected.overtimeWage,200);
+assert.strictEqual(overtimeV2.selected.nightSubsidy,25);
+assert.strictEqual(overtimeV2.selected.totalOvertimeIncome,225);
+assert.strictEqual(overtimeV2.selected.customExpenseNet,-5,'negative custom consumption increases cash value');
+assert.strictEqual(overtimeV2.selected.cashNetValue,180);
+assert.strictEqual(overtimeV2.selected.comprehensiveValue,156);
+assert.strictEqual(overtimeV2.points[1].hours,.5,'V2 curves always use half-hour intervals');
+assert.strictEqual(overtimeV2.rates[0].cashRate,60,'first discrete rate reflects the fixed subsidy and one-time costs');
+assert(overtimeV2.jumps.length===1,'fixed subsidy and costs expose an activation jump');
+const hourlySubsidy=api.analyzeOvertime({overtimeVersion:2,baseHourlyRate:50,multiplier:2,durationValue:2,nightSubsidyMode:'hourly',nightSubsidyAmount:8,maxHours:4});
+assert.strictEqual(hourlySubsidy.selected.nightSubsidy,16);
+assert.strictEqual(hourlySubsidy.selected.totalOvertimeIncome,216);
+assert.strictEqual(hourlySubsidy.jumps.length,0,'hourly subsidy does not create a fixed activation jump');
+const negativeChoice=api.analyzeOvertime({overtimeVersion:2,baseHourlyRate:0,multiplier:1.5,durationValue:2,restValuePerHour:10,maxHours:4});
+assert.strictEqual(negativeChoice.allPositiveHoursNegative,true);
+assert.strictEqual(negativeChoice.nodes.optimal.hours,0,'not working overtime remains the best legal candidate');
+const fatigueTurn=api.analyzeOvertime({overtimeVersion:2,baseHourlyRate:50,multiplier:1.5,durationValue:2,fatigueCoefficient:30,maxHours:8});
+assert(fatigueTurn.nodes.rateTurnsNegative,'discrete rate analysis finds a positive-to-negative interval');
+
 const living=api.calculateLiving({actualIncome:10000,rent:2500,food:1500,transport:300,utilities:400,dailyNeeds:500,otherNecessary:300,nonEssential:800,oneTime:200,workRelated:500,availableSavings:30000});
 assert.strictEqual(living.necessaryLiving,5500);
 assert.strictEqual(living.totalSpending,7000);
