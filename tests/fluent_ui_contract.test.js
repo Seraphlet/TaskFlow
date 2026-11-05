@@ -18,4 +18,9 @@ assert(css.includes('.app-shell:not(.home-shell):not(.playground-shell)'),'Fluen
 assert(css.includes('--canvas: #f5f6f8'),'Fluent work routes define the requested Mica token');
 assert(css.includes('.radar-workspace'),'Radar has an independent content-sidebar layout');
 assert(css.includes('.settings-workspace'),'Settings has a category sidebar layout');
+assert(/\.template-workspace\.content-sidebar-collapsed[\s\S]*?grid-template-columns:\s*0\s+38px\s+minmax\(0,1fr\)/.test(css),'collapsed template workspace reserves zero-width sidebar, toggle rail, and expanding main workspace');
+assert(/\.radar-workspace\.content-sidebar-collapsed[\s\S]*?grid-template-columns:\s*0\s+38px\s+minmax\(0,1fr\)/.test(css),'collapsed Radar workspace uses the same three-column contract');
+assert(/\.settings-workspace\.content-sidebar-collapsed[\s\S]*?grid-template-columns:\s*0\s+38px\s+minmax\(0,1fr\)/.test(css),'collapsed Settings workspace uses the same three-column contract');
+assert(css.includes('[contenteditable="true"]):focus-visible'),'work editors define an explicit Fluent keyboard focus ring');
+assert(css.includes('.drawer:not(.route-home):not(.route-playground) :is(button,input,textarea,select,a,[contenteditable="true"]):focus-visible'),'drawer inputs override the browser focus ring without changing Home or Playground');
 console.log('Fluent UI contract tests passed');
