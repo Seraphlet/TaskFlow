@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "custom_tool_value_example",
+  "version": 1,
+  "name": "工具投入示例",
+  "description": "可直接导入的受限公式模板示例。",
+  "inputs": [
+    { "id": "purchasePrice", "label": "购买价格", "type": "number", "default": 1200, "min": 0, "max": 1000000, "step": 0.01, "unit": "元" },
+    { "id": "usesPerMonth", "label": "每月使用次数", "type": "number", "default": 10, "min": 0, "max": 1000, "step": 1 },
+    { "id": "months", "label": "评估月数", "type": "number", "default": 12, "min": 1, "max": 120, "step": 1 },
+    { "id": "moneySavedPerUse", "label": "每次节省现金", "type": "number", "default": 2, "min": 0, "max": 1000000, "step": 0.01, "unit": "元" }
+  ],
+  "formulas": {
+    "totalUses": "usesPerMonth * months",
+    "costPerUse": "safeDiv(purchasePrice, totalUses)",
+    "directBenefit": "totalUses * moneySavedPerUse",
+    "netValue": "directBenefit - purchasePrice"
+  },
+  "outputs": [
+    { "source": "costPerUse", "label": "单次使用成本", "unit": "元" },
+    { "source": "directBenefit", "label": "累计直接收益", "unit": "元" },
+    { "source": "netValue", "label": "净经济价值", "unit": "元" }
+  ],
+  "exploration": {
+    "variable": "usesPerMonth",
+    "min": 0,
+    "max": 60,
+    "step": 1,
+    "crossings": [
+      { "id": "break-even", "left": "directBenefit", "right": "purchasePrice" }
+    ]
+  },
+  "cashflows": [
+    { "id": "purchase", "name": "工具购买", "direction": "expense", "amount": "purchasePrice", "monthOffset": "0" }
+  ]
+}

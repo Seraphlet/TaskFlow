@@ -1,55 +1,56 @@
-# Toward the Sea｜设备迁移与开发交接
+# Toward the Sea｜设备迁移、离职清理与开发交接
 
-更新时间：2026-11-05
-仓库：`git@github.com:Seraphlet/TaskFlow.git`
-分支：`main`
-功能交接基线：以当前 `main` 分支中包含“劳动与生活”模块的最新提交为准（接手时运行 `git log -1 --oneline` 核对）。
-
-## 1. 最重要的迁移提醒
-
-GitHub 保存的是源码，不保存当前浏览器和服务器的全部运行数据。
-
-| 内容 | 是否在 Git 中 | 换设备后的处理 |
-| --- | --- | --- |
-| HTML、CSS、JS、Python 后端、测试、背景图 | 是 | 从 GitHub clone 即可 |
-| 浏览器 IndexedDB 中的 Tasks、Local Notes、暂存、待办、事件、模板、提醒、Radar 历史 | 否 | 旧设备 Settings 导出 JSON，新设备导入 |
-| Memos 中的远端 Notes | 否，但数据在 Memos 服务器 | 新设备重新填写 Memos 地址和 Token 后读取 |
-| Tavily、DeepSeek、Memos API Key | 否 | 新设备重新填写；不要提交到 Git |
-| Windows 本地 `.env` | 否 | 如仍需要，使用安全渠道单独迁移，不要提交到 Git |
-| 服务器 `server/data/radar.sqlite3` | 否，`server/data/` 已忽略 | 仍在原服务器则无需处理；迁移服务器时单独备份 |
-| Nginx、systemd、证书配置 | 否，位于服务器系统目录 | 原服务器保留；更换服务器时单独迁移或重建 |
-
-如果完全不导出浏览器 JSON，Local 数据不会出现在新设备。代码仍可完整拉取，Memos 远端笔记也仍在，但仅存在旧浏览器 IndexedDB 的内容将留在旧设备。
-
-## 2. 产品命名与兼容边界
-
-用户界面名称已经改为 **Toward the Sea**。
-
-为避免历史数据失联，以下内部名称有意保留：
-
-- GitHub 仓库和服务器目录：`TaskFlow`
+- 更新时间：2026-11-06
+- 仓库：`git@github.com:Seraphlet/TaskFlow.git`
+- 分支：`main`
+- 服务器目录：`/var/www/html/TaskFlow`
 - systemd 服务：`taskflow-radar.service`
-- IndexedDB、localStorage、sessionStorage 的 `taskflow-*` 键
-- Memos 元数据：`taskflow:meta:v1`
-- 后端环境变量：`TASKFLOW_*`
-- JavaScript 全局命名空间：`TaskFlow*`
+- 线上地址：`https://memo.noahanna.online/taskflow/`
 
-不要只为统一名称而批量改动这些内部标识，除非同时设计并验证完整的数据迁移。
+本文件路径保持不变，便于 README 和新设备继续引用。界面名称是 **Toward the Sea**，仓库名、服务名和兼容键仍保留 TaskFlow。
 
-## 3. 新设备获取项目
+## 1. 离职清理电脑前必须完成
 
-### Windows 开发设备
+GitHub 只保存源码，不保存浏览器、服务器和本机凭证中的全部数据。
+
+| 内容 | 是否在 Git 中 | 清理前处理 |
+| --- | --- | --- |
+| HTML、CSS、JS、Python、测试、文档、静态图片 | 是 | 确认本次提交已出现在 GitHub `main` |
+| 浏览器 IndexedDB（Tasks、Local Notes、Radar、边际价值等） | 否 | Settings 导出 JSON，并安全保存到个人设备 |
+| Memos 远端笔记 | 否 | 数据仍在 Memos；记录服务地址，Token 在新设备重新创建或填写 |
+| Tavily、DeepSeek、Memos API Key | 否 | 不写入交接文档或 Git；新设备重新配置 |
+| Windows `.env` | 否 | 如仍需要，通过可信方式单独迁移，禁止提交 Git |
+| `server/data/radar.sqlite3` | 否 | 原服务器继续保留；迁移服务器时单独备份 |
+| Nginx、systemd、Let's Encrypt 配置 | 否 | 位于服务器系统目录，不在仓库中 |
+
+离职前清单：
+
+1. 打开 Settings，执行“导出本地 JSON”。
+2. 打开导出文件，确认 `schemaVersion` 为 `10`，且文件大小不是 0。
+3. 将 JSON 保存到个人且可信的位置；不要留在待清理的公司电脑上。
+4. 在 GitHub 网页确认 `main` 最新提交和本机 `git log -1 --oneline` 一致。
+5. 记录服务器、Memos 和域名地址，但不要把 Token、API Key 或 `.env` 内容写入 Git。
+6. 确认备份可用后，再清理公司电脑上的仓库、浏览器站点数据、SSH 私钥和凭证。
+
+> 如果没有导出 JSON，仅存在旧浏览器 IndexedDB 的本地数据无法从 GitHub 恢复。API Key 也不会包含在 JSON 备份中。
+
+## 2. 新设备恢复
+
+### 2.1 拉取源码
 
 ```powershell
 cd C:\Users\你的用户名\Desktop
 git clone git@github.com:Seraphlet/TaskFlow.git
 cd TaskFlow
+git status
 git log -1 --oneline
 ```
 
-应看到 `545f16c` 或更新提交。
+如果新设备还没有 GitHub SSH Key，先在新设备生成并添加到 GitHub，再执行 clone；不要复制公司设备的私钥到不可信位置。
 
-前端基础功能可以直接双击 `index.html`。Playground 动态模块和真实 Radar/Life AI 建议通过 HTTP 启动：
+### 2.2 本地运行
+
+完整运行（推荐，支持 Radar / AI 后端）：
 
 ```powershell
 python -m venv .venv
@@ -57,107 +58,109 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn server.app:app --host 127.0.0.1 --port 8788
 ```
 
-访问：`http://127.0.0.1:8788`
+访问 `http://127.0.0.1:8788`。
 
-只检查静态前端时也可以：
+只检查静态前端：
 
 ```powershell
 python -m http.server 4173
 ```
 
-访问：`http://127.0.0.1:4173`
+访问 `http://127.0.0.1:4173`。多数基础功能也可双击 `index.html`，但动态模块、CORS 和 API 在 HTTP 环境更可靠。
 
-## 4. 现有服务器更新
+### 2.3 恢复数据和凭证
 
-当前服务器代码目录：`/var/www/html/TaskFlow`
-当前 systemd 服务：`taskflow-radar.service`
-当前网页路径：`https://memo.noahanna.online/taskflow/`
+1. Settings 导入离职前导出的 JSON。
+2. 检查 Tasks、Local Notes、Radar 历史、暂存、待办、日历、模板和边际价值记录。
+3. 重新填写 Memos、Tavily、DeepSeek 凭证。
+4. Memos Notes 不与 Local Notes 自动合并；先确认当前数据源再编辑。
 
-更新代码：
+## 3. Ubuntu 服务器更新
+
+本次主要是静态前端、IndexedDB、文档和测试更新，正常情况下无需重启 Nginx 或 FastAPI：
 
 ```bash
 cd /var/www/html/TaskFlow
-git status
-git pull origin main
+git status --short --branch
+git pull --ff-only origin main
 git log -1 --oneline
-```
-
-纯静态改动不要求重启 Nginx。包含 `server/` 后端修改时执行：
-
-```bash
-sudo systemctl restart taskflow-radar
-sudo systemctl status taskflow-radar --no-pager
-sudo journalctl -u taskflow-radar -n 50 --no-pager
-```
-
-检查站点：
-
-```bash
 curl -I https://memo.noahanna.online/taskflow/
 ```
 
-浏览器使用 `Ctrl + Shift + R` 强制刷新版本化静态资源。
+然后在浏览器打开站点并按 `Ctrl + Shift + R`。若 `git status` 显示服务器有本地修改，不要执行 `reset --hard`；先备份并确认差异。
 
-如需查看实际 systemd 配置位置和启动命令：
+未来提交包含 `server/` 或 Python 依赖变化时，再执行：
+
+```bash
+cd /var/www/html/TaskFlow
+python3 -m pip install -r requirements.txt
+sudo systemctl restart taskflow-radar
+sudo systemctl status taskflow-radar --no-pager
+sudo journalctl -u taskflow-radar -n 80 --no-pager
+```
+
+正确服务名是 `taskflow-radar.service`，不是 `taskflow.service`。查看实际配置：
 
 ```bash
 systemctl show taskflow-radar -p FragmentPath --value
 sudo systemctl cat taskflow-radar
 ```
 
-不要把服务名改成 `toward-the-sea`；界面名称变化不要求迁移 systemd 服务。
-
-## 5. 当前架构
+## 4. 当前工程结构
 
 ```text
 index.html
-├─ styles.css                         全站布局、首页、工作页和响应式样式
-├─ js/app.js                          应用外壳、路由、页面渲染、事件委托
-├─ js/storage.js                      IndexedDB 与 JSON 导入导出
-├─ js/interaction-guards.js           编辑拖选防误触
-├─ js/personal-workspace.js           暂存、待办、日历、提醒、模板领域规则
-├─ js/labor-life.js                   劳动与生活的纯计算与校验规则
+├─ styles.css                         全站、工作页、响应式和打印样式
+├─ js/app.js                          应用外壳、路由、页面与事件委托
+├─ js/storage.js                      IndexedDB V10、导入导出与兼容
+├─ js/labor-life.js                   加班、工资等既有确定性计算
+├─ js/marginal-planning.js            资金规划、事件冲击与可持续性计算
+├─ js/evaluation-engine.js            统一安全 JSON 选择评估引擎
 ├─ js/notes.js                        Local / Memos Notes 与草稿
-├─ js/classifications.js              内容类型与主题分类
-├─ js/content-library.js              内容检索与展示
-├─ js/radar.js                        Radar 凭证和前端 Provider
-├─ js/playground/                     Music、Keyboard、Life Geometry
-└─ server/app.py                      FastAPI、静态文件、Radar 与 Life API
+├─ js/personal-workspace.js           暂存、待办、日历、提醒和模板
+├─ js/radar.js                        Radar 凭证和 Provider
+├─ js/playground/                     数字艺术
+├─ server/app.py                      FastAPI、Radar / Life API 与静态服务
+├─ docs/marginal-value-architecture.md
+└─ examples/evaluation-template-tool-value.json
 ```
 
-前端无构建工具，主要使用传统 HTML、CSS、JavaScript 和 IndexedDB。后端是可选 FastAPI 服务。
+前端仍是无构建工具的 HTML、CSS、JavaScript；后端是可选 FastAPI。不要为接手方便擅自迁移框架或重置 IndexedDB。
 
-## 6. 当前功能
+## 5. “边际价值”V10 架构
 
-- 首页 Bento 工作台与本地背景图
-- Quick Capture 临时暂存、完成撤销、转个人待办
-- 个人 To-do、日期、截止时间和提醒
-- 月历、独立事件和到期提醒中心
-- 本地模板中心、变量填充、搜索、分类、收藏和复制
-- Task 管理、进度更新、Activity 和交接历史
-- 劳动与生活：工资和工时历史、加班收益曲线、生活成本与储蓄预测、目标薪资和候选工作比较
-- 工作页面 Fluent / Mica 界面：桌面主导航可折叠，Notes / Templates / Radar / Settings 拥有独立内容侧栏；Home 和数字艺术保持原布局与视觉
-- Local / Memos Notes、草稿恢复和标题为空正文兼容
-- 内容分类、中文输入法兼容和稳定分类 ID
-- Radar 的 Tavily / DeepSeek 联网发现、预算、缓存和历史
-- Music、Keyboard、Life Geometry 数字艺术
-- JSON V1–V8 合并导入与完整本地数据导出
+当前入口由四部分组成：
 
-左侧“个人管理”是默认折叠的 Accordion，包含暂存、待办、日历和模板。桌面端导航区独立滚动；“＋ 快速暂存”与本地状态卡片组成固定 Footer，不会因子菜单展开而移动。
+1. **基础事实记录**：工资、工时、生活成本等可复用事实。
+2. **加班价值**：保留离散结算、补贴、溢价、费用、主观状态、曲线、打印和 AI 分析。
+3. **资金规划**：计划收入、固定/弹性支出、目标、事件冲击和储备金方案。
+4. **选择评估**：同一个安全 JSON 模板引擎驱动工具购买、工作机会、迁居等选择。
 
-Drawer 的遮罩关闭使用完整指针手势判断：只有 `pointerdown` 和 `pointerup` 都直接发生在遮罩层，才视为主动点击遮罩。由输入框开始的文字拖选即使在遮罩上松开，也不会关闭编辑器；关闭按钮仍保留未保存内容确认。
+资金规划核心公式：
 
-## 7. 本地数据与备份
+```text
+C = I - E - F          # 当前可支配余额
+R = C - P              # 完成目标后的余额
+R_rem = R - X          # 已知事件后的余额
+R_after = R_rem - x    # 模拟新增事件后的余额
+```
 
-IndexedDB 数据库版本为 V8。V7 的个人工作区集合包括：
+储备金不会自动填补缺口，只有用户明确选择使用时才进入结果。事实、方案、计算快照分开保存，历史记录不会因为后来修改参数而被重算覆盖。
 
-- `captures`
-- `todos`
-- `calendarEvents`
-- `templates`
-- `reminders`
+选择评估引擎：
 
-V8 新增“劳动与生活”集合：
+- 使用白名单运算符解释模板，不使用 `eval` / `Function`。
+- 内置模板与用户导入模板使用同一验证和计算路径。
+- 内置模板包括工具购买、工作机会、迁居评估。
+- 非法字段、未知运算符、除零和非有限数会返回明确错误。
+
+模块间只显式传递必要事实：加班结果可写入事实，资金规划可读取事实，选择评估可以引用已确认参数；不会隐式覆盖其他模块数据。
+
+## 6. IndexedDB 与备份兼容
+
+当前数据库版本：**V10**。
+
+V8 既有集合继续保留：
 
 - `salaryRecords`
 - `overtimeDecisions`
@@ -165,102 +168,80 @@ V8 新增“劳动与生活”集合：
 - `laborParameters`
 - `jobComparisons`
 
-工资、生活、加班和工作比较记录均把用户输入的 `facts` 与保存时的计算 `snapshot` 分开存储，避免以后调整参数时静默覆盖历史判断。工资 V2 使用月份、实际工作天数、每日工时、工作日额外加班小时、周末天数和法定节假日天数；实际总工时不会重复加入周末与节假日工时。`formulaVersion < 2` 的旧记录继续使用原字段和原公式编辑，不进行破坏性迁移。V1–V7 旧备份仍可导入；只有 V8 备份要求包含上述五个集合。
+V10 新增：
 
-原有 Tasks、Activity、Handoffs、Team、Notes、Notes Drafts 和 Radar 集合保持兼容。
+- `fundScenarios`
+- `evaluationTemplates`
+- `evaluationRecords`
 
-JSON 导入按 ID 合并，相同 ID 保留当前本地数据，不覆盖。超过 24 小时的已完成暂存不会因为旧备份导入而恢复。
+Tasks、Activity、Handoffs、Team、Notes、Notes Drafts、Radar、个人工作区集合均保持。导入器支持 V1–V10；相同 ID 默认保留当前本地记录，避免旧备份静默覆盖新数据。API Key 不参与导入导出。
 
-迁移浏览器数据：
+不要删除旧 store、批量改 `taskflow-*` 键，或把旧记录原地转换成新结构。需要迁移时先增加版本、兼容读取和回滚测试。
 
-1. 旧设备打开 Settings。
-2. 点击“导出本地 JSON”。
-3. 通过可信方式把 JSON 传到新设备。
-4. 新设备打开 Settings，点击“导入 JSON”。
-5. 检查 Tasks、Local Notes、暂存、待办、日历和模板。
+## 7. 必须保留的内部名称
 
-API Key 不在 JSON 中，必须重新配置。
+用户界面名称是 **Toward the Sea**，但以下内部标识为兼容历史数据而保留：
 
-## 8. 后端运行数据与环境变量
+- GitHub 仓库与服务器目录：`TaskFlow`
+- systemd：`taskflow-radar.service`
+- IndexedDB / Web Storage：`taskflow-*`
+- Memos 元数据：`taskflow:meta:v1`
+- 后端环境变量：`TASKFLOW_*`
+- JavaScript 全局命名空间：`TaskFlow*`
 
-默认 SQLite 路径：`server/data/radar.sqlite3`。目录被 `.gitignore` 排除。
+## 8. 验证基线
 
-常用环境变量：
-
-- `TASKFLOW_RADAR_DATA_DIR`
-- `TASKFLOW_IDENTITY_SECRET`
-- `TASKFLOW_TAVILY_SEARCH_DEPTH`
-- `TASKFLOW_TAVILY_MONTHLY_CREDIT_BUDGET`
-- 兼容旧变量：`TASKFLOW_TAVILY_MONTHLY_BUDGET`
-
-不要把真实 API Key、身份密钥、`.env` 或 SQLite 数据库提交到 GitHub。
-
-## 9. 测试
-
-Windows：
+提交前应执行：
 
 ```powershell
-$failed=$false
-Get-ChildItem tests -Filter *.test.js | ForEach-Object {
-  node $_.FullName
-  if($LASTEXITCODE -ne 0){$failed=$true}
-}
-if($failed){exit 1}
-.\.venv\Scripts\python.exe -m pytest -q
+node --test tests/*.test.js
 node --check js/app.js
+node --check js/storage.js
+node --check js/marginal-planning.js
+node --check js/evaluation-engine.js
 git diff --check
 ```
 
-当前基线结果：
+2026-11-06 基线：27 个 JavaScript 测试文件全部通过。已在真实浏览器验证：
 
-- 20 组 JavaScript 测试通过（包含 Fluent UI 契约与工资 V2 边界）
-- Python：25 passed，4 个子测试通过
-- 已知测试警告：Starlette TestClient 的 `httpx` 弃用提示，不影响当前通过结果
+- 保存基础事实。
+- 资金规划示例得到 `4550` 元余额。
+- 目标与事件后出现 `-150` 元缺口，且未自动使用储备金。
+- 保存资金方案快照。
+- 三种选择模板可计算并保存。
+- 公式说明抽屉可打开。
+- IndexedDB 正常升级到 V10。
 
-## 10. 最近关键提交
+## 9. 已知限制
 
-- `04f4469`：修复 Drawer 拖选释放到遮罩时意外关闭；固定侧边栏底部操作区
-- `545f16c`：手风琴导航、编辑拖选防误触、Toward the Sea 显示名称
-- `b074ab8`：增加设备迁移与开发交接文档
-- `a5343b0`：个人暂存、待办、日历、提醒和模板中心
-- `8960cdd`：仅标题 Notes 在 Memos 中不再显示为空
-- `725a5c6`：Memos 分类元数据同步
-- `4d6901c`：工作页面密度与 Notes 文字画布优化
+- 浏览器本地数据不等于云备份；清除站点数据会丢失未导出的内容。
+- 资金预测是确定性情景计算，不是投资、法律或财务建议。
+- 疲劳、意愿和时间价值属于个人输入，不是医学量表，也不应被模型伪装成客观事实。
+- 选择评估模板是辅助比较，不替用户作最终决定。
+- 税前和税后收入缺少换算依据时不会自动混合比较。
+- `file://` 下动态 import、远端请求和 CORS 可能受浏览器限制。
+- 服务器 SQLite、Nginx、systemd 和证书不在 GitHub 中，需要服务器级备份。
 
-## 11. 已知限制与人工验收
+## 10. 固定接手流程
 
-- “劳动与生活”不提供税前转税后计算；候选工作为税前口径时，必须填写用户自己的税后估算才能比较。疲劳成本、休息时间价值和未来增长率均是主观假设，不是法律、医学或投资建议。
-- 趋势图使用轻量原生 SVG；图表时间范围按最近 6 期、12 期或全部记录筛选。自定义周期的记录按周期起始日期排序，不把预测点伪装成真实历史。
-- 纯前端提醒只保证页面打开或重新打开后显示，不保证关闭网页时后台推送。
-- Templates 仅本地保存，不同步 Memos。
-- `file://` 下 Playground 动态模块和远端请求可能受浏览器安全策略限制。
-- Memos 是否能从 `file://` 连接取决于服务器 CORS；正式使用建议 HTTPS 同源部署。
-- 2026-10-25 已使用本机 Edge 桌面视口完成真实 Pointer 事件验收：从 Drawer 文本域按下、拖到遮罩松开后 Drawer 保持打开；取消放弃修改时保持打开；确认后关闭按钮正常关闭。
-- 同次浏览器验收中，“个人管理”展开前后 Footer 顶部位置均为 `591.3125px`；导航区在 `488px` 可视高度内独立承载 `554px` 内容并滚动，Footer 底部保持在 `702px / 720px` 视口内。
-- 后续若调整 Drawer、全局点击委托或侧边栏 Flex 结构，应重新执行 `tests/interaction_guards.test.js`、`tests/personal_workspace_ui_contract.test.js`，并复验上述真实拖选场景。
-
-## 12. 当前阶段结论
-
-截至 2026-11-05，“劳动与生活”四阶段功能已经增量并入 Toward the Sea：工资记录和时薪估算、加班决策、生活成本与储蓄预测、职业目标与工作比较均可独立使用并纳入 V8 备份。后续工作不要重建项目、重置 IndexedDB 或批量重命名 `taskflow-*` 兼容标识。
-
-工作页面在 2026-11-05 完成 Fluent V3 增量重构。新样式集中在 `styles.css` 尾部，并严格以 `.app-shell:not(.home-shell):not(.playground-shell)` 为作用域；Drawer 也用路由类排除 Home 与 Playground。以后调整视觉时必须保留这个隔离边界。设置页仍使用原保存动作与数据结构，只改变分类导航和默认展示层级；Radar、Notes、Templates 的内容侧栏只属于各自模块，不与主导航共用折叠状态。
-
-## 13. 新任务接手建议
-
-在新设备开始工作时先执行：
+新设备或新 Agent 开始前：
 
 ```bash
-git status
-git pull origin main
+git status --short --branch
+git pull --ff-only origin main
 git log -5 --oneline
 ```
 
-然后阅读：
+阅读顺序：
 
-1. 本交接文档
-2. 根目录 `README.md`
-3. 与任务直接相关的模块和测试
+1. 本交接文档。
+2. `README.md`。
+3. `docs/marginal-value-architecture.md`。
+4. `js/storage.js`、`js/marginal-planning.js`、`js/evaluation-engine.js`。
+5. 对应测试文件。
 
-可以把下面文字直接发给新的开发 Agent：
+推荐交给下一位开发者的开场说明：
 
-> 请先阅读 `docs/Toward-the-Sea-Handoff-2026-10-25.md` 和 `README.md`，确认当前 Git 基线与工作区状态，再对 Toward the Sea 做增量修改。保留 `taskflow-*` 内部兼容标识，不重置 IndexedDB，不覆盖用户数据。修改后运行全部 JavaScript 和 Python 测试，并明确区分自动化验证与实际浏览器人工验收。
+> 请在 Toward the Sea 当前 `main` 上增量开发。先阅读交接文档和边际价值架构说明，运行全部测试；保留 IndexedDB V1–V10、Memos 元数据、`taskflow-*` 键和服务器服务名兼容，不重建项目、不清空数据。任何修改先验证现状，再做最小变更。
+
+边际价值重构前的本地回滚基线为 `8cad8f0`。本次重构对应提交以 GitHub `main` 上提交信息 `feat: rebuild marginal value architecture` 为准。

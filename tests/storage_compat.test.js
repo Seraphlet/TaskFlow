@@ -11,7 +11,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(source, context);
 
-const { LocalStorageAdapter, STORES, LABOR_LIFE_STORES, DB_VERSION } = context.window.TaskFlowStorage;
+const { LocalStorageAdapter, STORES, LABOR_LIFE_STORES, MARGINAL_VALUE_STORES, DB_VERSION } = context.window.TaskFlowStorage;
 const adapter = new LocalStorageAdapter();
 const dataFor = (stores) => Object.fromEntries(stores.map((name) => [name, []]));
 
@@ -42,12 +42,16 @@ assert.strictEqual(adapter.validateImport(versionSeven), true, 'V7 backup must r
 assert.throws(() => adapter.validateImport({schemaVersion:7,data:dataFor(preV8Stores.filter((name)=>name!=='templates'))}),/templates/,'V7 backups must include templates');
 const versionEight={schemaVersion:8,data:dataFor(STORES)};
 delete versionEight.data.overtimeStatusRecords;
-assert.strictEqual(DB_VERSION,9);
+assert.strictEqual(DB_VERSION,10);
 assert.strictEqual(adapter.validateImport(versionEight),true,'V8 backups include all labor and life stores');
 assert.throws(()=>adapter.validateImport({schemaVersion:8,data:dataFor(STORES.filter((name)=>!['salaryRecords','overtimeStatusRecords'].includes(name)))}),/salaryRecords/,'V8 backups must include original labor stores');
 const versionNine={schemaVersion:9,data:dataFor(STORES)};
+MARGINAL_VALUE_STORES.forEach((name)=>delete versionNine.data[name]);
 assert.strictEqual(adapter.validateImport(versionNine),true,'V9 backups include overtime status records');
 assert.throws(()=>adapter.validateImport({schemaVersion:9,data:dataFor(STORES.filter((name)=>name!=='overtimeStatusRecords'))}),/overtimeStatusRecords/,'V9 backups must include status records');
+const versionTen={schemaVersion:10,data:dataFor(STORES)};
+assert.strictEqual(adapter.validateImport(versionTen),true,'V10 backups include marginal value stores');
+assert.throws(()=>adapter.validateImport({schemaVersion:10,data:dataFor(STORES.filter((name)=>name!=='fundScenarios'))}),/fundScenarios/,'V10 backups must include fund scenarios');
 
 (async () => {
   const mergeAdapter = new LocalStorageAdapter();
@@ -55,7 +59,7 @@ assert.throws(()=>adapter.validateImport({schemaVersion:9,data:dataFor(STORES.fi
   mergeAdapter.all = async (name) => structuredClone(memory[name]);
   mergeAdapter.putMany = async (name, values) => { memory[name].push(...structuredClone(values)); };
   const payload = {
-    schemaVersion: 9,
+    schemaVersion: 10,
     data: dataFor(STORES),
   };
   payload.data.tasks = [{ id:'existing', title:'must not overwrite' }, { id:'incoming', title:'new task' }];

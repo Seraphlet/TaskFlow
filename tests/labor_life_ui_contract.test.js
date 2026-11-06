@@ -8,7 +8,8 @@ const storage=fs.readFileSync('js/storage.js','utf8');
 
 assert(html.includes('js/labor-life.js'),'calculation module loads before app');
 assert(app.includes("navButton('labor-life'"),'sidebar exposes independent labor and life route');
-for(const tab of ['salary','overtime','living','career'])assert(app.includes(`['${tab}'`)||app.includes(`'${tab}'`),`page contains ${tab} area`);
+for(const tab of ['overtime','funds','evaluation'])assert(app.includes(`['${tab}'`)||app.includes(`'${tab}'`),`page contains ${tab} primary area`);
+assert(app.includes('marginalBasicsPanel()'),'salary and living facts remain discoverable outside the three primary tabs');
 for(const store of ['salaryRecords','overtimeDecisions','livingRecords','laborParameters','jobComparisons'])assert(storage.includes(`'${store}'`),`storage includes ${store}`);
 assert(app.includes('facts,snapshot'),'records separate facts and calculation snapshots');
 assert(app.includes('id="labor-overtime-form"'),'overtime curve has live input form');
@@ -20,6 +21,7 @@ assert(app.includes('overtimeSvgChart(rateSeries,analysis,{rate:true})'),'overti
 assert(app.includes('allPositiveHoursNegative'),'negative scenarios explicitly preserve the no-overtime recommendation');
 assert(app.includes('id="labor-forecast-form"'),'savings forecast has adjustable assumptions');
 assert(app.includes('candidateBasis'),'job comparison preserves salary basis');
+assert(app.includes('actualWorkDays??salary?.facts?.normalDays'),'work comparison supports both current and legacy work-day fields');
 assert(app.includes('id="labor-history-range"'),'historical charts expose a time-range filter');
 assert(app.includes("label:'储蓄余额'"),'living history includes recorded savings balance');
 assert(app.includes('labor-split-charts'),'hourly wage and living cost use separate charts and axes');
