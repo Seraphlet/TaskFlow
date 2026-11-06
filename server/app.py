@@ -725,7 +725,8 @@ async def test_connection(request: ProviderRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/api/overtime/analyze")
+@app.post("/api/radar/overtime/analyze")
+@app.post("/api/overtime/analyze", include_in_schema=False)
 async def analyze_overtime(request: OvertimeAnalysisRequest) -> dict[str, Any]:
     try:
         model_id = validate_model_id(request.modelId)

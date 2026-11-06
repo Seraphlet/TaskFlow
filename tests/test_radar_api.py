@@ -79,7 +79,7 @@ class RadarApiTests(unittest.TestCase):
         model_result = {"summary": "当前方案未达到个人门槛。", "suggestions": ["可以选择不加班"], "cautions": ["疲劳记录未填写"]}
         with patch("server.app.deepseek_json", AsyncMock(return_value=model_result)) as model_call:
             response = self.client.post(
-                "/api/overtime/analyze",
+                "/api/radar/overtime/analyze",
                 json={
                     "credentials": {"tavilyApiKey": "", "deepseekApiKey": "sk-valid-overtime-key"},
                     "modelId": "deepseek-flash",

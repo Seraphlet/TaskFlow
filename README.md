@@ -121,7 +121,7 @@ Settings 输入的 Radar 密钥会即时保留在当前页面会话中，因此�
 
 密钥只通过同源 POST 请求 Body 发送，不进入 URL、Toward the Sea JSON 导入导出、后端数据库、推荐消息或日志。后端仅为调用 Tavily 与 DeepSeek 在请求生命周期内使用明文 Key。浏览器长期存储不能抵御共享设备访问、同源恶意脚本或 XSS，建议只在个人可信设备启用。
 
-生产环境建议由 Nginx 将站点以及 `/api/radar/`、`/api/life/` 同源反向代理到 FastAPI，并启用 HTTPS。不要把 FastAPI 数据目录、Git 仓库或其他服务器文件配置为公开静态目录。
+生产环境建议由 Nginx 将站点以及 `/api/radar/`、`/api/life/` 同源反向代理到 FastAPI，并启用 HTTPS。加班 AI 分析复用 `/api/radar/overtime/analyze`，不需要增加独立代理路径。不要把 FastAPI 数据目录、Git 仓库或其他服务器文件配置为公开静态目录。
 
 ## 改进方向｜加班必要支出记录与预测（未来版本，尚未实现）
 

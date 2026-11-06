@@ -78,6 +78,16 @@ assert.strictEqual(localStorage.has('taskflow-tavily-api-key-v1'), false);
   assert.strictEqual(request.url.includes('sk-header-or-body-only'), false);
   assert.strictEqual(requestTimeout, 240000);
 
+  const overtimeProvider = new RemoteRadarProvider({ tavilyApiKey:'', deepseekApiKey:'sk-header-or-body-only', modelId:'deepseek-flash' });
+  await overtimeProvider.analyzeOvertime({ current:{ hours:1 } });
+  assert.strictEqual(request.url, '/api/radar/overtime/analyze');
+  assert.strictEqual(requestTimeout, 60000);
+
+  context.fetch = async () => ({ ok:false, status:404, text:async()=>JSON.stringify({ detail:'Not Found' }) });
+  await assert.rejects(() => overtimeProvider.analyzeOvertime({}), /AI 分析接口不存在（HTTP 404）/);
+  context.fetch = async () => { const error=new Error('aborted');error.name='AbortError';throw error; };
+  await assert.rejects(() => overtimeProvider.analyzeOvertime({}), /AI 分析请求超时/);
+
   credentials.clear();
   const cleared = credentials.getCredentials();
   assert.strictEqual(cleared.tavilyApiKey, '');

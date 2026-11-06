@@ -32,6 +32,8 @@ assert(app.includes('重要 · 当前 ${laborMoney(facts.restValuePerHour)}/h ·
 assert(app.includes('updateOvertimeViewDom(form)'),'node inspection has a lightweight DOM-only update path');
 assert(app.includes('overtimeAnalysisPoint(analysis'),'node inspection reuses precomputed analysis points');
 assert(app.includes('requestAnimationFrame'),'high-frequency node inspection updates are coalesced');
+assert(app.includes("name:'multiplier',label:'加班总倍率',value:facts.multiplier,min:0,max:5,step:.01"),'overtime multiplier supports 0.01 precision');
+assert(app.includes("name:'overtimeHourlyRate',label:'加班时薪',value:facts.overtimeHourlyRate")&&app.includes("step:.01})}</div><p class=\"normal-rate-help"),'overtime hourly rate supports 0.01 precision');
 assert(app.includes('状态记录已删除'),'status records support deletion');
 assert(app.includes("submit:overtime-status"),'status saves use a record-scoped mutual exclusion key');
 assert(storage.includes("'overtimeStatusRecords'"),'status records have an independent persistent store');

@@ -186,7 +186,13 @@
       return this.post('/api/life/generate', { birthYear, worldId, worldLabel, direction }, 240000);
     }
     async analyzeOvertime(snapshot) {
-      return this.post('/api/overtime/analyze', { snapshot }, 120000);
+      try {
+        return await this.post('/api/radar/overtime/analyze', { snapshot }, 60000);
+      } catch (error) {
+        if (error?.status === 404) throw new Error('AI 分析接口不存在（HTTP 404），请确认服务器代码已更新并重启 taskflow-radar');
+        if (/请求超时/.test(String(error?.message || ''))) throw new Error('AI 分析请求超时，请稍后重试');
+        throw error;
+      }
     }
   }
 

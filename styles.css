@@ -1128,6 +1128,8 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .overtime-ai-result { padding: 12px 14px; border-left: 3px solid #526780; background: #fff; }
 .overtime-ai-result.stale { border-left-color: #b7791f; background: #fff8e8; }
 .overtime-ai-result strong { display: block; margin-bottom: 6px; color: #795518; }
+.overtime-ai-status { grid-column: 1 / -1; margin: 0; color: #40566f; font-size: 12px; font-weight: 700; }
+.overtime-ai-card.is-loading { border-color: #9fb0c5; background: #f3f6f9; }
 .overtime-help-list { display: grid; gap: 10px; }
 .overtime-help-list article { padding: 12px 14px; border: 1px solid #e2e6ed; border-radius: 9px; background: #fff; }
 .overtime-help-list h4 { margin: 0 0 5px; color: #25364b; font-size: 14px; }

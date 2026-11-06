@@ -24,7 +24,12 @@ assert(app.includes("d.type === 'overtime-detail'"),'result calculations reuse t
 assert(app.includes('data-overtime-detail'),'main result cards expose calculation details');
 assert(app.includes('data-overtime-ai-host'),'optional AI analysis has a dedicated result host');
 assert(app.includes("provider.analyzeOvertime(payload)"),'AI analysis reuses the configured Radar provider');
-assert(radar.includes("'/api/overtime/analyze'"),'AI analysis uses the same trusted backend boundary');
+assert(radar.includes("'/api/radar/overtime/analyze'"),'AI analysis uses the existing proxied Radar backend boundary');
+assert(app.includes('正在生成分析……'),'AI analysis exposes an immediate loading state');
+assert(app.includes('aiPending')&&app.includes('aiRequestId'),'AI analysis has an entry-level request guard');
+assert(app.includes('requestSignature!==overtimeRuntime.signature'),'stale AI responses cannot overwrite changed parameters');
+assert(app.includes("toast('分析生成成功')"),'AI analysis reports success only after a valid response');
+assert(app.includes('finally {')&&app.includes('overtimeRuntime.aiPending=false'),'AI request state is released through finally');
 assert(css.includes('.overtime-config-group'),'fold groups have a compact local style');
 assert(css.includes('.overtime-help-list'),'field help follows existing drawer styling');
 assert(css.includes('.home-focus-capture')&&css.includes('.home-capture-focus'),'swapped home content has scoped style adaptations');

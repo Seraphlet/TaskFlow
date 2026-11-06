@@ -107,7 +107,7 @@
     return {
       modelVersion:legacy?1:(requestedVersion>=3?3:2),
       scenario:input.scenario==='rest-day'?'rest-day':'after-work',
-      baseHourlyRate:round(normalHourlyRate,4),normalHourlyRate:round(normalHourlyRate,4),normalWage:round(normalWage),normalPaidHours:round(normalPaidHours,4),
+      baseHourlyRate:round(normalHourlyRate,4),normalHourlyRate:round(normalHourlyRate,4),normalWage:round(normalWage,2),normalPaidHours:round(normalPaidHours,4),
       multiplier:round(multiplier,4),overtimeHourlyRate:round(overtimeHourlyRate,4),overtimeRateMode:input.overtimeRateMode==='hourly'?'hourly':'multiplier',
       selectedHours:legacy?rawHours:round(Math.round(rawHours*2)/2,2),
       dailyHours,
