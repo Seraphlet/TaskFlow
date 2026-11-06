@@ -136,7 +136,32 @@
       legacyCommuteHours:legacy?0:number(input.legacyCommuteHours,'旧版通勤时间',{min:0,max:48}),
       restValuePerHour:number(input.restValuePerHour,'休息时间价值',{min:0,max:1e7}),
       fatigueCoefficient:number(input.fatigueCoefficient,'疲劳成本系数',{min:0,max:1e7}),
+      fatigueMode:['linear','quadratic','threshold'].includes(input.fatigueMode)?input.fatigueMode:'manual',
+      fatigueMaxCoefficient:number(input.fatigueMaxCoefficient??10,'最大疲劳系数',{min:0,max:1e7}),
+      fatigueThreshold:number(input.fatigueThreshold??40,'疲劳容忍阈值',{min:0,max:99}),
+      fatigueRecords:Array.isArray(input.fatigueRecords)?input.fatigueRecords.filter(r=>r&&r.fatigue!=null&&Number.isFinite(Number(r.fatigue))&&Number.isFinite(Number(r.hours))&&Number(r.hours)>0).map(r=>({hours:Number(r.hours),fatigue:Math.max(0,Math.min(100,Number(r.fatigue)))})).sort((a,b)=>a.hours-b.hours):[],
+
     };
+  }
+
+  // Interpolate observations; beyond the last observation, hold its value as a scenario assumption.
+  function fatigueAtHours(input,h) {
+    const records=[{hours:0,fatigue:0},...input.fatigueRecords];
+    if(records.length===1)return null;
+    if(h<=0)return 0;
+    const next=records.find(r=>r.hours>=h);
+    if(!next)return records.at(-1).fatigue;
+    const index=records.indexOf(next),prev=records[index-1]||records[0];
+    return next.hours===prev.hours?next.fatigue:prev.fatigue+(next.fatigue-prev.fatigue)*(h-prev.hours)/(next.hours-prev.hours);
+  }
+  function fatigueCoefficientAt(input,h) {
+    if(input.fatigueMode==='manual')return input.fatigueCoefficient;
+    const score=fatigueAtHours(input,h);
+    if(score==null)return 0;
+    const x=score/100,max=input.fatigueMaxCoefficient;
+    if(input.fatigueMode==='linear')return max*x;
+    if(input.fatigueMode==='quadratic')return max*x*x;
+    return max*Math.pow(Math.max(0,score-input.fatigueThreshold)/(100-input.fatigueThreshold),2);
   }
 
   function overtimePoint(input, hours) {
@@ -161,11 +186,11 @@
     const minimumAcceptableReturn=input.minimumAcceptableHourly*actualOccupiedHours;
     const acceptanceGap=cashNetValue-minimumAcceptableReturn;
     const restOpportunityCost=input.restValuePerHour*actualOccupiedHours;
-    const fatigueCost = input.fatigueCoefficient * h * h / 2;
+    const fatigueCost = fatigueCoefficientAt(input,h) * h * h / 2;
     const comprehensiveValue = cashNetValue - restOpportunityCost - fatigueCost;
     const subsidyHourly=input.modelVersion>=2&&input.nightSubsidyMode==='hourly'?input.nightSubsidyAmount:0;
-    const marginalNetValue=input.overtimeHourlyRate+subsidyHourly-(input.modelVersion===1?input.variableCostPerHour:input.variableExtraCostPerHour+input.legacyVariableCostPerHour)-input.restValuePerHour-input.fatigueCoefficient*h;
-    return {hours:round(h,4),settledHours:round(settledHours,4),overtimeIncome:round(overtimeIncome),overtimeWage:round(overtimeIncome),nightSubsidy:round(nightSubsidy),settlementBonus:round(settlementBonus),totalOvertimeIncome:round(totalOvertimeIncome),actualIncrementalIncome:round(totalOvertimeIncome),normalPayBaseline:round(normalPayBaseline),overtimePremium:round(overtimePremium),premiumPerHour:h>EPSILON?round(overtimePremium/h):0,totalMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate,4):null,premiumMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate-1,4):null,taxiCost:round(active?input.taxiCost:0),mealCost:round(active?input.mealCost:0),customExpenseNet:round(active?customExpenseNet:0),fixedCost:round(fixedCost),variableCost:round(variableCost),extraCosts:round(fixedCost+variableCost),cashNetValue:round(cashNetValue),actualOccupiedHours:round(actualOccupiedHours,4),actualNetHourly:actualNetHourly==null?null:round(actualNetHourly),minimumAcceptableReturn:round(minimumAcceptableReturn),acceptanceGap:round(acceptanceGap),restOpportunityCost:round(restOpportunityCost),fatigueCost:round(fatigueCost),comprehensiveValue:round(comprehensiveValue),marginalNetValue:round(marginalNetValue)};
+    const marginalNetValue=input.overtimeHourlyRate+subsidyHourly-(input.modelVersion===1?input.variableCostPerHour:input.variableExtraCostPerHour+input.legacyVariableCostPerHour)-input.restValuePerHour-(input.fatigueMode==='manual'?input.fatigueCoefficient*h:(h>0?(fatigueCoefficientAt(input,h)*h*h-fatigueCoefficientAt(input,Math.max(0,h-.01))*Math.max(0,h-.01)**2)/.02:0));
+    return {hours:round(h,4),settledHours:round(settledHours,4),overtimeIncome:round(overtimeIncome),overtimeWage:round(overtimeIncome),nightSubsidy:round(nightSubsidy),settlementBonus:round(settlementBonus),totalOvertimeIncome:round(totalOvertimeIncome),actualIncrementalIncome:round(totalOvertimeIncome),normalPayBaseline:round(normalPayBaseline),overtimePremium:round(overtimePremium),premiumPerHour:h>EPSILON?round(overtimePremium/h):0,totalMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate,4):null,premiumMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate-1,4):null,taxiCost:round(active?input.taxiCost:0),mealCost:round(active?input.mealCost:0),customExpenseNet:round(active?customExpenseNet:0),fixedCost:round(fixedCost),variableCost:round(variableCost),extraCosts:round(fixedCost+variableCost),cashNetValue:round(cashNetValue),actualOccupiedHours:round(actualOccupiedHours,4),actualNetHourly:actualNetHourly==null?null:round(actualNetHourly),minimumAcceptableReturn:round(minimumAcceptableReturn),acceptanceGap:round(acceptanceGap),restOpportunityCost:round(restOpportunityCost),fatigueCost:round(fatigueCost),mappedFatigue:fatigueAtHours(input,h),effectiveFatigueCoefficient:round(fatigueCoefficientAt(input,h),4),fatigueEstimateAvailable:input.fatigueMode==='manual'||input.fatigueRecords.length>0,comprehensiveValue:round(comprehensiveValue),marginalNetValue:round(marginalNetValue)};
   }
 
   function overtimeSettlementPoints(input) {
