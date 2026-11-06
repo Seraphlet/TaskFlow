@@ -84,6 +84,10 @@ class LifeGenerateRequest(ProviderRequest):
     direction: str = Field(default="", max_length=300)
 
 
+class OvertimeAnalysisRequest(ProviderRequest):
+    snapshot: dict[str, Any]
+
+
 class LifeCharacter(BaseModel):
     id: str = Field(min_length=1, max_length=80)
     name: str = Field(min_length=1, max_length=80)
@@ -719,6 +723,41 @@ async def test_connection(request: ProviderRequest) -> dict[str, Any]:
         "tavily": {"configured": tavily_configured, "tested": False},
         "note": "连接测试不会调用搜索接口或消耗搜索 credits；Tavily 将在首次探索时验证。",
     }
+
+
+@app.post("/api/overtime/analyze")
+async def analyze_overtime(request: OvertimeAnalysisRequest) -> dict[str, Any]:
+    try:
+        model_id = validate_model_id(request.modelId)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    serialized = json.dumps(request.snapshot, ensure_ascii=False)
+    if len(serialized) > 60_000:
+        raise HTTPException(400, "加班分析快照过大，请减少状态记录后重试")
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是克制的劳动价值分析助手。金额、节点和结算规则只能引用输入 JSON，"
+                "不得自行计算、修改或编造；疲劳与意愿只在有真实记录时讨论，且不得换算为金钱。"
+                "允许明确建议不加班。只返回 JSON："
+                '{"summary":"两到三句总结","suggestions":["建议"],"cautions":["限制"]}。'
+            ),
+        },
+        {"role": "user", "content": serialized},
+    ]
+    result = await deepseek_json(request.credentials.deepseekApiKey, model_id, messages, max_tokens=1200)
+    summary = str(result.get("summary", "")).strip() if isinstance(result, dict) else ""
+    suggestions = [str(item).strip() for item in result.get("suggestions", [])[:5] if str(item).strip()] if isinstance(result, dict) else []
+    cautions = [str(item).strip() for item in result.get("cautions", [])[:4] if str(item).strip()] if isinstance(result, dict) else []
+    if not summary:
+        raise HTTPException(502, "DeepSeek 未返回有效的加班分析")
+    parts = [summary]
+    if suggestions:
+        parts.append("建议：" + "；".join(suggestions))
+    if cautions:
+        parts.append("注意：" + "；".join(cautions))
+    return {"analysis": "\n\n".join(parts), "provider": "DeepSeek", "modelId": model_id}
 
 
 @app.post("/api/life/generate")

@@ -154,6 +154,16 @@ tbody tr:last-child td { border-bottom: 0; }
 .home-focus p { max-width: 720px; margin: 18px 0 25px; color: #c7d2e5; font-size: 16px; }
 .home-focus .btn { align-self: flex-start; background: rgba(255,255,255,.94); color: #101827; border-color: rgba(255,255,255,.9); }
 .home-focus .badge { background: rgba(255,255,255,.14); color: white; }
+.home-focus-capture { justify-content: flex-start; }
+.home-focus-capture .home-card-head { width: 100%; }
+.home-focus-capture .home-card-head h4 { font-size: clamp(26px,3vw,38px); }
+.home-focus-capture .home-capture-form { width: 100%; margin-top: 28px; }
+.home-focus-capture .home-capture-form textarea { min-height: 88px; font-size: 15px; }
+.home-focus-capture .home-empty { margin: 20px 0 0; }
+.home-capture-focus { display: flex; flex-direction: column; justify-content: flex-end; }
+.home-capture-focus h3 { margin: 8px 0 0; font-size: 23px; overflow-wrap: anywhere; }
+.home-capture-focus p { margin: 10px 0 16px; color: #c7d2e5; }
+.home-capture-focus .btn { align-self: flex-start; }
 .home-date { grid-area: date; min-height: 288px; display: flex; flex-direction: column; justify-content: space-between; background: rgba(15,23,42,.42); }
 .home-date time { display: flex; align-items: flex-end; gap: 18px; }
 .home-date strong { font-size: clamp(74px,8vw,108px); font-weight: 760; line-height: .78; letter-spacing: -.08em; font-variant-numeric: tabular-nums; }
@@ -178,6 +188,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .home-radar-list span { color: #8fd3b8; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .home-radar-list b { line-height: 1.35; overflow-wrap: anywhere; }
 .home-actions { grid-area: actions; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 19px; padding-bottom: 19px; }
+.home-actions-card { display: flex; align-items: stretch; flex-direction: column; justify-content: space-between; gap: 16px; }
+.home-actions-card .home-action-list { display: grid; grid-template-columns: 1fr; }
+.home-todos-card { align-items: flex-start; flex-direction: column; }
+.home-todos-card .home-card-head { width: 100%; }
+.home-todos-card .home-compact-list { width: 100%; }
 .home-capture { grid-area: capture; }
 .home-todos { grid-area: todos; }
 .home-agenda { grid-area: agenda; }
@@ -674,6 +689,27 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .labor-analysis-form,.labor-forecast-form,.labor-job-form,.labor-parameter-form { display: grid; gap: 16px; }
 .labor-analysis-form details { padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .labor-analysis-form details .labor-form-grid { margin-top: 12px; }
+.labor-analysis-form .overtime-advanced-settings { padding: 14px 16px 16px; border: 1px solid #cbd5e1; border-left: 4px solid #526780; border-radius: 10px; background: #f8fafc; }
+.overtime-advanced-settings summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.overtime-advanced-settings summary small { padding: 4px 8px; border-radius: 999px; color: #40566f; background: #e7edf4; font-size: 11px; font-weight: 750; white-space: nowrap; }
+.overtime-advanced-intro { margin: 10px 0 0; color: #526071; font-size: 12px; line-height: 1.6; }
+.labor-analysis-form .overtime-config-group { padding: 0; border: 1px solid #d8dee8; border-radius: 10px; background: #fbfcfd; overflow: hidden; }
+.overtime-config-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; list-style: none; }
+.overtime-config-group > summary::-webkit-details-marker { display: none; }
+.overtime-config-group > summary span { display: grid; gap: 3px; }
+.overtime-config-group > summary small { color: #64748b; font-weight: 600; }
+.overtime-config-group > summary i { color: #526780; font-size: 11px; font-style: normal; font-weight: 750; white-space: nowrap; }
+.overtime-config-group[open] > summary { border-bottom: 1px solid #e2e6ed; background: #f3f6f9; }
+.overtime-config-group[open] > summary i { font-size: 0; }
+.overtime-config-group[open] > summary i::after { content: "收起"; font-size: 11px; }
+.overtime-config-body { display: grid; gap: 13px; padding: 15px; }
+.overtime-config-body > p { margin: 0; color: #64748b; font-size: 12px; }
+.field-help-button { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: 4px; padding: 0; border: 1px solid #9fb0c5; border-radius: 50%; color: #40566f; background: #fff; font: 800 11px/1 inherit; vertical-align: middle; cursor: pointer; }
+.field-help-button:hover { border-color: #526780; background: #e7edf4; }
+.overtime-inspection-control { display: grid; grid-template-columns: minmax(240px,.55fr) minmax(360px,1fr); align-items: end; gap: 18px; padding: 14px 16px; border: 1px solid #d8dee8; border-radius: 10px; background: #fbfcfd; }
+.overtime-inspection-control > div > b { color: #27384c; font-size: 14px; }
+.overtime-inspection-control > div > p { margin: 5px 0 0; color: #64748b; font-size: 12px; line-height: 1.55; }
+.overtime-inspection-control .paired-number-field { margin: 0; }
 .labor-range { display: grid; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .labor-range input { accent-color: var(--coral); }
 .labor-live-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
@@ -1045,6 +1081,11 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .overtime-expense-row label { display: grid; gap: 5px; color: #64748b; font-size: 12px; font-weight: 700; }
 .overtime-expense-empty { margin: 0; padding: 8px 0; }
 .overtime-summary { grid-template-columns: repeat(5,minmax(0,1fr)); }
+.overtime-result-card { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 11px; color: inherit; background: #fafbf9; text-align: left; cursor: pointer; transition: border-color .18s ease,box-shadow .18s ease; }
+.overtime-result-card:hover { border-color: #9fb0c5; box-shadow: 0 5px 16px rgba(51,65,85,.08); }
+.overtime-result-card span,.overtime-result-card small { display: block; color: var(--muted); font-size: 11px; }
+.overtime-result-card b { display: block; margin: 5px 0 3px; font-size: 17px; overflow-wrap: anywhere; }
+.overtime-result-card small { opacity: .78; }
 .overtime-chart-block { display: grid; gap: 8px; padding-top: 8px; }
 .overtime-chart-block.compact { padding-top: 2px; }
 .overtime-chart .overtime-zero-line { stroke: #8793a3; stroke-width: 1; stroke-dasharray: 4 4; }
@@ -1069,7 +1110,9 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .overtime-print-report { display: none; }
 .overtime-view-caption { margin: -3px 0 5px; color: #64748b; font-size: 12px; }
 .overtime-point-detail { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
-.overtime-point-detail span { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #e2e6ed; border-radius: 8px; color: #64748b; font-size: 11px; background: #fff; }
+.overtime-point-detail span,.overtime-point-detail button { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #e2e6ed; border-radius: 8px; color: #64748b; font: inherit; font-size: 11px; background: #fff; text-align: left; }
+.overtime-point-detail button { cursor: pointer; }
+.overtime-point-detail button:hover { border-color: #9fb0c5; }
 .overtime-point-detail b { color: #25364b; font-size: 13px; }
 .overtime-legend-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .overtime-legend-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid #d8dee8; border-radius: 999px; color: #334155; background: #fff; font: inherit; cursor: pointer; }
@@ -1079,8 +1122,23 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
 .overtime-suggestions { padding: 13px 15px; border: 1px solid #d8dee8; border-radius: 10px; background: #f8fafc; }
 .overtime-suggestions ul { margin: 7px 0 0; padding-left: 20px; color: #526071; }
 .overtime-suggestions li + li { margin-top: 4px; }
-.overtime-status-section { display: grid; gap: 15px; }
-.overtime-status-section form { display: grid; gap: 13px; }
+.overtime-ai-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 18px; padding: 15px 16px; border: 1px solid #d8dee8; border-radius: 10px; background: #f8fafc; }
+.overtime-ai-card > div > p { margin: 5px 0 0; color: #64748b; font-size: 12px; }
+.overtime-ai-card > .subtle,.overtime-ai-result { grid-column: 1 / -1; margin: 0; }
+.overtime-ai-result { padding: 12px 14px; border-left: 3px solid #526780; background: #fff; }
+.overtime-ai-result.stale { border-left-color: #b7791f; background: #fff8e8; }
+.overtime-ai-result strong { display: block; margin-bottom: 6px; color: #795518; }
+.overtime-help-list { display: grid; gap: 10px; }
+.overtime-help-list article { padding: 12px 14px; border: 1px solid #e2e6ed; border-radius: 9px; background: #fff; }
+.overtime-help-list h4 { margin: 0 0 5px; color: #25364b; font-size: 14px; }
+.overtime-help-list p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.6; }
+.normal-rate-help { margin: 0; padding: 10px 12px; border-left: 3px solid #526780; border-radius: 0 8px 8px 0; color: #475569; background: #f3f6f9; font-size: 12px; line-height: 1.55; }
+.normal-rate-help.incomplete { border-left-color: #b7791f; color: #795518; background: #fff8e8; }
+.overtime-status-section { display: grid; gap: 20px; margin-top: 4px; padding: 22px 24px 24px; }
+.overtime-status-section form { display: grid; gap: 17px; }
+.overtime-status-grid { grid-template-columns: repeat(2,minmax(280px,1fr)); gap: 18px 22px; }
+.overtime-status-meta { grid-template-columns: repeat(2,minmax(180px,320px)); gap: 14px; }
+.overtime-status-section form > .row-actions { justify-content: flex-start; padding-top: 2px; }
 .overtime-reasons { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 12px; border: 1px solid #d8dee8; border-radius: 9px; }
 .overtime-reasons legend { padding: 0 5px; color: #64748b; font-size: 12px; font-weight: 700; }
 .overtime-reasons label { display: inline-flex; align-items: center; gap: 5px; color: #475569; font-size: 13px; }
@@ -1136,6 +1194,11 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .overtime-status-card { grid-template-columns: 1fr auto; }
   .overtime-status-card > p { grid-column: 1 / -1; }
   .overtime-point-detail { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .overtime-status-section { padding: 19px; }
+  .overtime-status-grid { grid-template-columns: repeat(2,minmax(220px,1fr)); gap: 16px; }
+  .overtime-inspection-control { grid-template-columns: 1fr; align-items: stretch; }
+  .overtime-ai-card { grid-template-columns: 1fr; }
+  .overtime-ai-card > .btn { justify-self: start; }
 }
 @media (max-width: 560px) {
   .content-sidebar-layout:not(.content-sidebar-collapsed) { grid-template-columns: 1fr; }
@@ -1143,13 +1206,17 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .content-sidebar-collapsed > .content-sidebar-toggle { margin-bottom: 8px; }
   .labor-history-heading { align-items: flex-start; flex-direction: column; }
   .drawer-facts div { grid-template-columns: 1fr; gap: 3px; }
-  .labor-form-grid.compact,.overtime-rate-grid,.overtime-summary,.overtime-nodes,.overtime-save-row { grid-template-columns: 1fr; }
+  .labor-form-grid.compact,.overtime-rate-grid,.overtime-summary,.overtime-nodes,.overtime-save-row,.overtime-status-grid,.overtime-status-meta { grid-template-columns: 1fr; }
   .overtime-duration,.overtime-expense-row { grid-template-columns: 1fr; }
   .paired-number-field > div { grid-template-columns: minmax(90px,1fr) 96px; }
   .overtime-section-head { align-items: flex-start; flex-wrap: wrap; }
   .overtime-section-head > .btn { width: 100%; margin-left: 36px; }
   .overtime-save-row > .btn { grid-column: auto; }
   .overtime-status-card { grid-template-columns: 1fr; }
+  .overtime-status-section { padding: 16px; }
+  .overtime-inspection-control { padding: 13px; }
+  .overtime-advanced-settings summary { align-items: flex-start; flex-direction: column; }
+  .overtime-advanced-settings summary small { white-space: normal; }
   .overtime-legend-buttons { justify-content: flex-start; }
   .overtime-point-detail { grid-template-columns: 1fr; }
 }
@@ -1181,7 +1248,8 @@ mark { padding: 0 .08em; border-radius: 3px; background: #ffe2a9; color: inherit
   .overtime-print-analysis { margin-top: 6mm; }
   .overtime-print-analysis > h2 { padding-bottom: 2mm; border-bottom: 1px solid #cbd5e1; }
   .overtime-print-report .labor-live-summary { grid-template-columns: repeat(5,1fr); gap: 2mm; }
-  .overtime-print-report .labor-live-summary > div { min-height: 0; padding: 2.5mm; background: #f5f7fa !important; border: 1px solid #dde3eb; box-shadow: none; }
+  .overtime-print-report .labor-live-summary > div,.overtime-print-report .labor-live-summary > button { min-height: 0; padding: 2.5mm; background: #f5f7fa !important; border: 1px solid #dde3eb; box-shadow: none; }
+  .overtime-print-report .overtime-result-card small { display: none; }
   .overtime-print-report .labor-live-summary b { font-size: 11pt; }
   .overtime-print-report .warning { padding: 2.5mm; }
   .overtime-print-report .overtime-chart-block { gap: 2mm; padding-top: 4mm; break-inside: avoid; }

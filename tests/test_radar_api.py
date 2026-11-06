@@ -75,6 +75,22 @@ class RadarApiTests(unittest.TestCase):
         self.assertNotIn("short", response.text)
         self.assertEqual(response.json()["detail"], "请求结构无效，请检查凭证、模型 ID 和 Profile 字段")
 
+    def test_overtime_ai_reuses_provider_and_returns_only_analysis(self):
+        model_result = {"summary": "当前方案未达到个人门槛。", "suggestions": ["可以选择不加班"], "cautions": ["疲劳记录未填写"]}
+        with patch("server.app.deepseek_json", AsyncMock(return_value=model_result)) as model_call:
+            response = self.client.post(
+                "/api/overtime/analyze",
+                json={
+                    "credentials": {"tavilyApiKey": "", "deepseekApiKey": "sk-valid-overtime-key"},
+                    "modelId": "deepseek-flash",
+                    "snapshot": {"current": {"hours": 2, "cashNetValue": -5}, "statusRecords": []},
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("可以选择不加班", response.json()["analysis"])
+        self.assertNotIn("sk-valid-overtime-key", response.text)
+        model_call.assert_awaited_once()
+
     def test_deepseek_json_parser_accepts_common_wrappers(self):
         expected = {"items": [{"title": "测试"}]}
         self.assertEqual(parse_deepseek_json('{"items":[{"title":"测试"}]}'), expected)

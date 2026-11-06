@@ -15,7 +15,8 @@ assert(app.includes("new URLSearchParams(location.search).get('saveTiming') === 
 
 assert(app.includes('data-print-overtime'),'overtime analysis exposes a print/PDF action');
 assert(app.includes('window.print()'),'PDF export uses the browser print dialog');
-assert(app.includes('overtimePrintReportHtml(facts,analysis,statusRecords)'),'the print report follows the current unsaved trial data');
+assert(app.includes("template.innerHTML=overtimePrintReportHtml(facts,analysis,records,ai)"),'the print report is generated on demand from current unsaved trial data');
+assert(!app.includes('id="labor-overtime-print-host"'),'normal parameter changes do not maintain a hidden duplicate print report');
 assert(app.includes("portal.id='overtime-print-portal'"),'printing uses a top-level report portal that is independent of app layout');
 assert(app.includes("window.addEventListener('afterprint',cleanup"),'the temporary print portal is cleaned after printing');
 assert(css.includes('@media print'),'A4 print styles are present');

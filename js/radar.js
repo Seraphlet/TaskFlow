@@ -185,6 +185,9 @@
     async generateLife({ birthYear, worldId, worldLabel, direction = '' }) {
       return this.post('/api/life/generate', { birthYear, worldId, worldLabel, direction }, 240000);
     }
+    async analyzeOvertime(snapshot) {
+      return this.post('/api/overtime/analyze', { snapshot }, 120000);
+    }
   }
 
   function normalizeLegacyItems(items = []) {
