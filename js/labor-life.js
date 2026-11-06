@@ -287,5 +287,39 @@
     return signals;
   }
 
-  window.TaskFlowLaborLife={round,overtimeHours,calculateSalary,calculateSalaryLegacy,calculateSalaryV2,normalizeOvertimeInput,overtimePoint,overtimeSettlementPoints,analyzeOvertime,calculateLiving,forecastSavings,salaryTargets,compareJobs,decisionSignals};
+  const OVERTIME_DECISION_RULES=Object.freeze({
+    lowWillingnessMax:25,
+    highWillingnessMin:75,
+    highFatigueMin:75,
+    meaningfulChange:20,
+    staleAfterHours:6
+  });
+
+  function overtimeDecisionContext({analysis,records=[],decisionDate='',referenceTime=Date.now(),rules=OVERTIME_DECISION_RULES}={}) {
+    if(!analysis?.points?.length)throw new Error('缺少加班分析结果');
+    const matching=(Array.isArray(records)?records:[]).filter((item)=>!decisionDate||item?.decisionDate===decisionDate).sort((a,b)=>String(a.observedAt||a.createdAt||'').localeCompare(String(b.observedAt||b.createdAt||'')));
+    const latest=matching.at(-1)||null,latestTime=latest?Date.parse(latest.observedAt||latest.createdAt||''):NaN,referenceMs=referenceTime instanceof Date?referenceTime.getTime():Number.isFinite(Number(referenceTime))?Number(referenceTime):Date.parse(referenceTime);
+    const ageHours=Number.isFinite(latestTime)&&Number.isFinite(referenceMs)?Math.max(0,(referenceMs-latestTime)/3600000):null;
+    const stale=Boolean(latest)&&(ageHours==null||ageHours>Number(rules.staleAfterHours));
+    const currentRecord=latest&&!stale?latest:null,previousRecord=currentRecord&&matching.length>1?matching.at(-2):null;
+    const plannedHours=Number(analysis.selected?.hours||0),actualHours=currentRecord?Number(currentRecord.hours||0):plannedHours;
+    const currentPoint=analysis.points.find((point)=>Math.abs(point.hours-actualHours)<1e-9)||analysis.points.reduce((best,point)=>Math.abs(point.hours-actualHours)<Math.abs(best.hours-actualHours)?point:best,analysis.points[0]);
+    const optimalHours=Number(analysis.nodes?.optimal?.hours||0),willingness=currentRecord?.willingness==null?null:Number(currentRecord.willingness),fatigue=currentRecord?.fatigue==null?null:Number(currentRecord.fatigue);
+    const willingnessDelta=willingness!=null&&previousRecord?.willingness!=null?willingness-Number(previousRecord.willingness):null;
+    const nextSettlement=(analysis.settlementPoints||[]).find((point)=>point.hours>currentPoint.hours+1e-9)||null;
+    const nextPoint=nextSettlement?(analysis.points.find((point)=>Math.abs(point.hours-nextSettlement.hours)<1e-9)||null):null;
+    return {
+      rules,matching,latest,currentRecord,previousRecord,stale,ageHours,plannedHours,actualHours:currentPoint.hours,currentPoint,optimalHours,nextSettlement,nextPoint,willingness,fatigue,willingnessDelta,
+      lowWillingness:willingness!=null&&willingness<=Number(rules.lowWillingnessMax),
+      highWillingness:willingness!=null&&willingness>=Number(rules.highWillingnessMin),
+      highFatigue:fatigue!=null&&fatigue>=Number(rules.highFatigueMin),
+      willingnessChangedMeaningfully:willingnessDelta!=null&&Math.abs(willingnessDelta)>=Number(rules.meaningfulChange),
+      economicPositive:Number(currentPoint.cashNetValue)>0,
+      comprehensivePositive:Number(currentPoint.comprehensiveValue)>=0,
+      meetsPersonalThreshold:Number(currentPoint.acceptanceGap)>=0,
+      positionToOptimal:currentPoint.hours>optimalHours+1e-9?'after':currentPoint.hours<optimalHours-1e-9?'before':'at'
+    };
+  }
+
+  window.TaskFlowLaborLife={round,overtimeHours,calculateSalary,calculateSalaryLegacy,calculateSalaryV2,normalizeOvertimeInput,overtimePoint,overtimeSettlementPoints,analyzeOvertime,calculateLiving,forecastSavings,salaryTargets,compareJobs,decisionSignals,OVERTIME_DECISION_RULES,overtimeDecisionContext};
 })();

@@ -115,6 +115,42 @@ const incurred=api.analyzeOvertime({overtimeVersion:3,baseHourlyRate:20,overtime
 const leaveNow=api.overtimePoint(incurred.input,1),nextNode=api.overtimePoint(incurred.input,2);
 assert.strictEqual(nextNode.cashNetValue-leaveNow.cashNetValue,28,'continuation delta does not charge the already-incurred fixed taxi cost again');
 
+const decisionAnalysis={
+  points:[0,.5,1,1.5,2,2.5,3,3.5,4].map((hours)=>({hours,cashNetValue:hours*20,comprehensiveValue:30-Math.abs(hours-1.5)*10,acceptanceGap:hours?5:-1,totalOvertimeIncome:hours*25,overtimePremium:hours*5,extraCosts:hours*5,actualOccupiedHours:hours})),
+  selected:{hours:3},viewPoint:{hours:4},nodes:{optimal:{hours:1.5}},settlementPoints:[{hours:2.5}],acceptableRanges:[{fromHours:.5,toHours:4}],noAcceptableOvertime:false
+};
+const statusNow='2026-11-06T12:00:00.000Z';
+const decisionContext=api.overtimeDecisionContext({analysis:decisionAnalysis,decisionDate:'2026-11-06',referenceTime:Date.parse(statusNow),records:[
+  {decisionDate:'2026-11-06',hours:1,fatigue:45,willingness:50,observedAt:'2026-11-06T10:00:00.000Z'},
+  {decisionDate:'2026-11-06',hours:2,fatigue:80,willingness:3,observedAt:'2026-11-06T11:30:00.000Z'},
+  {decisionDate:'2026-11-05',hours:4,fatigue:10,willingness:100,observedAt:'2026-11-06T11:45:00.000Z'}
+]});
+assert.strictEqual(decisionContext.actualHours,2,'real status hours are independent from planned and inspected hours');
+assert.strictEqual(decisionContext.positionToOptimal,'after','actual hours are compared with the economic optimum');
+assert.strictEqual(decisionContext.highFatigue,true);
+assert.strictEqual(decisionContext.lowWillingness,true);
+assert.strictEqual(decisionContext.willingnessDelta,-47);
+assert.strictEqual(decisionContext.nextPoint.hours,2.5,'next settlement starts from real actual hours');
+assert.strictEqual(decisionContext.matching.length,2,'records from another decision date are ignored');
+const staleContext=api.overtimeDecisionContext({analysis:decisionAnalysis,decisionDate:'2026-11-06',referenceTime:Date.parse(statusNow),records:[{decisionDate:'2026-11-06',hours:2,fatigue:80,willingness:3,observedAt:'2026-11-06T01:00:00.000Z'}]});
+assert.strictEqual(staleContext.currentRecord,null,'expired status is not treated as the current subjective state');
+assert.strictEqual(staleContext.actualHours,3,'stale status falls back to planned duration, never the inspected node');
+const willingButNegative={...decisionAnalysis,points:decisionAnalysis.points.map((point)=>({...point,cashNetValue:-10}))};
+const highWillingness=api.overtimeDecisionContext({analysis:willingButNegative,decisionDate:'2026-11-06',referenceTime:Date.parse(statusNow),records:[{decisionDate:'2026-11-06',hours:1,fatigue:null,willingness:90,observedAt:'2026-11-06T11:30:00.000Z'}]});
+assert.strictEqual(highWillingness.highWillingness,true,'high willingness remains an independent subjective fact');
+assert.strictEqual(highWillingness.economicPositive,false,'subjective willingness does not alter economic results');
+const beforeOptimal=api.overtimeDecisionContext({analysis:decisionAnalysis,decisionDate:'2026-11-06',referenceTime:Date.parse(statusNow),records:[{decisionDate:'2026-11-06',hours:1,fatigue:null,willingness:10,observedAt:'2026-11-06T11:30:00.000Z'}]});
+assert.strictEqual(beforeOptimal.positionToOptimal,'before');
+assert.strictEqual(beforeOptimal.lowWillingness,true,'low willingness is recognized even when fatigue is missing');
+assert.strictEqual(beforeOptimal.fatigue,null);
+const atOptimal=api.overtimeDecisionContext({analysis:decisionAnalysis,decisionDate:'2026-11-06',referenceTime:Date.parse(statusNow),records:[{decisionDate:'2026-11-06',hours:1.5,fatigue:80,willingness:null,observedAt:'2026-11-06T11:30:00.000Z'}]});
+assert.strictEqual(atOptimal.positionToOptimal,'at');
+assert.strictEqual(atOptimal.highFatigue,true,'fatigue remains usable when willingness is missing');
+assert.strictEqual(atOptimal.willingness,null);
+const noStatus=api.overtimeDecisionContext({analysis:decisionAnalysis,decisionDate:'2026-11-06',referenceTime:Date.parse(statusNow),records:[]});
+assert.strictEqual(noStatus.currentRecord,null);
+assert.strictEqual(noStatus.actualHours,3,'without a status record the economic plan remains the fallback');
+
 const living=api.calculateLiving({actualIncome:10000,rent:2500,food:1500,transport:300,utilities:400,dailyNeeds:500,otherNecessary:300,nonEssential:800,oneTime:200,workRelated:500,availableSavings:30000});
 assert.strictEqual(living.necessaryLiving,5500);
 assert.strictEqual(living.totalSpending,7000);

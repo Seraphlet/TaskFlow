@@ -36,6 +36,12 @@ assert(app.includes("name:'multiplier',label:'加班总倍率',value:facts.multi
 assert(app.includes("name:'overtimeHourlyRate',label:'加班时薪',value:facts.overtimeHourlyRate")&&app.includes("step:.01})}</div><p class=\"normal-rate-help"),'overtime hourly rate supports 0.01 precision');
 assert(app.includes('状态记录已删除'),'status records support deletion');
 assert(app.includes("submit:overtime-status"),'status saves use a record-scoped mutual exclusion key');
+assert(app.includes('overtimeDecisionContext({analysis,records,decisionDate})'),'offline suggestions use centralized, testable decision rules');
+assert(app.includes('正收益不等于必须继续'),'positive cash value is not presented as an instruction to continue');
+assert(app.includes('不必为追求数学最优值而强制继续'),'low willingness can outweigh chasing the model optimum');
+assert(app.includes('不再当作当前疲劳或继续意愿'),'expired subjective records are explicitly downgraded');
+assert(!app.includes('analysis.viewPoint?.hours??latest?.hours'),'inspecting another curve node cannot replace actual status hours');
+assert(app.includes('plannedHours:analysis.selected.hours')&&!app.includes('viewHours:(analysis.viewPoint||analysis.selected).hours'),'curve inspection does not invalidate AI analysis or redefine actual status');
 assert(storage.includes("'overtimeStatusRecords'"),'status records have an independent persistent store');
 assert(css.includes('.overtime-subjective-chart'),'subjective scores use a separate 0-100 chart');
 assert(css.includes('.overtime-inspection-control'),'chart inspection controls have a dedicated responsive layout');
