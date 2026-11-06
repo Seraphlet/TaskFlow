@@ -91,6 +91,52 @@
     })).sort((a,b)=>a.hours-b.hours);
   }
 
+  const WILLINGNESS_ANCHORS=Object.freeze([[50,1],[60,.33],[70,.225],[80,.12],[90,.06],[100,0]]);
+
+  function willingnessFactor(value) {
+    if(value==null||value==='')return null;
+    const willingness=number(value,'加班意愿',{min:0,max:100,required:true});
+    if(willingness===0)return null;
+    if(willingness<=50){const distance=50-willingness;return round(Math.exp(.029012*distance+.000463515*distance*distance),6);}
+    for(let index=0;index<WILLINGNESS_ANCHORS.length-1;index+=1){const [from,fromFactor]=WILLINGNESS_ANCHORS[index],[to,toFactor]=WILLINGNESS_ANCHORS[index+1];if(willingness<=to)return round(fromFactor+(willingness-from)*(toFactor-fromFactor)/(to-from),6);}
+    return 0;
+  }
+
+  function willingnessAttitude(value) {
+    if(value==null||value==='')return '未记录';const willingness=Number(value);
+    if(willingness===0)return '明确不愿意自愿加班';
+    if(willingness<50)return '更倾向下班';
+    if(willingness===50)return '中性，加不加都能接受';
+    if(willingness<=60)return '轻度愿意，仍有摇摆';
+    if(willingness<80)return '偏向继续加班';
+    return '继续加班意愿较强';
+  }
+
+  function normalizeWillingnessRecords(value) {
+    return (Array.isArray(value)?value:[]).filter((item)=>item?.willingness!=null&&item.willingness!=='').map((item,index)=>({id:String(item.id||`status-${index}`),hours:number(item.hours,'状态记录时长',{min:0,max:744}),willingness:number(item.willingness,'状态记录意愿',{min:0,max:100}),observedAt:String(item.observedAt||item.createdAt||'')})).sort((a,b)=>a.hours-b.hours||a.observedAt.localeCompare(b.observedAt));
+  }
+
+  function willingnessAt(input,hours) {
+    const records=input.willingnessRecords||[],scenario=input.willingnessScenario;
+    if(!records.length)return scenario==null?{value:null,source:'unknown'}:{value:scenario,source:'scenario'};
+    const exact=[...records].reverse().find((item)=>Math.abs(item.hours-hours)<EPSILON);if(exact)return {value:exact.willingness,source:'record'};
+    const before=[...records].reverse().find((item)=>item.hours<hours),after=records.find((item)=>item.hours>hours);
+    if(before&&after){const ratio=(hours-before.hours)/(after.hours-before.hours);return {value:round(before.willingness+(after.willingness-before.willingness)*ratio,4),source:'interpolated'};}
+    if(!before&&after)return scenario==null?{value:null,source:'unknown-before-first-record'}:{value:scenario,source:'scenario-before-first-record'};
+    if(before&&!after)return {value:before.willingness,source:'assumption-latest-record'};
+    return scenario==null?{value:null,source:'unknown'}:{value:scenario,source:'scenario'};
+  }
+
+  function subjectiveTimeCost(input,hours) {
+    const current=willingnessAt(input,hours);if(current.value==null)return {cost:null,refusal:false,unknown:true};if(current.value===0)return {cost:null,refusal:true,unknown:false};
+    if(hours<=EPSILON)return {cost:0,refusal:false,unknown:false};
+    const fixedHours=input.modelVersion===1?input.commuteHours:input.legacyCommuteHours+input.extraOccupiedHours;
+    const start=willingnessAt(input,0);if(start.value==null)return {cost:null,refusal:false,unknown:true};if(start.value===0)return {cost:null,refusal:true,unknown:false};
+    let cost=input.timeValueReference*willingnessFactor(start.value)*fixedHours;
+    for(let from=0;from<hours-EPSILON;from+=.5){const to=Math.min(hours,from+.5),mid=(from+to)/2,state=willingnessAt(input,mid);if(state.value==null)return {cost:null,refusal:false,unknown:true};if(state.value===0)return {cost:null,refusal:true,unknown:false};cost+=input.timeValueReference*willingnessFactor(state.value)*(to-from);}
+    return {cost:round(cost),refusal:false,unknown:false};
+  }
+
   function normalizeOvertimeInput(input = {}) {
     const requestedVersion=Number(input.overtimeVersion||0);
     const legacy=requestedVersion<2&&!['taxiCost','mealCost','nightSubsidyMode','customExpenses'].some((key)=>Object.prototype.hasOwnProperty.call(input,key));
@@ -104,8 +150,12 @@
     const enteredMultiplier=number(input.multiplier||1.5,'加班倍率',{min:0,max:10,required:true});const directOvertimeRate=number(input.overtimeHourlyRate||0,'加班时薪',{min:0,max:1e7});
     const overtimeHourlyRate=input.overtimeRateMode==='hourly'&&directOvertimeRate>0?directOvertimeRate:normalHourlyRate*enteredMultiplier;
     const multiplier=normalHourlyRate>EPSILON?overtimeHourlyRate/normalHourlyRate:enteredMultiplier;
+    const modelVersion=legacy?1:(requestedVersion>=4?4:requestedVersion>=3?3:2);
+    const restValueProvided=input.restValueProvided===true||input.restValueMode==='manual'||(requestedVersion<4&&Object.prototype.hasOwnProperty.call(input,'restValuePerHour'));
+    const restValuePerHour=number(input.restValuePerHour,'休息时间价值',{min:0,max:1e7});
+    const willingnessScenario=input.willingnessScenario==null||input.willingnessScenario===''?null:number(input.willingnessScenario,'当前加班意愿',{min:0,max:100});
     return {
-      modelVersion:legacy?1:(requestedVersion>=3?3:2),
+      modelVersion,
       scenario:input.scenario==='rest-day'?'rest-day':'after-work',
       baseHourlyRate:round(normalHourlyRate,4),normalHourlyRate:round(normalHourlyRate,4),normalWage:round(normalWage,2),normalPaidHours:round(normalPaidHours,4),
       multiplier:round(multiplier,4),overtimeHourlyRate:round(overtimeHourlyRate,4),overtimeRateMode:input.overtimeRateMode==='hourly'?'hourly':'multiplier',
@@ -134,7 +184,8 @@
       legacyFixedCost:legacy?0:number(input.legacyFixedCost,'旧版固定支出',{min:0,max:1e9}),
       legacyVariableCostPerHour:legacy?0:number(input.legacyVariableCostPerHour,'旧版每小时支出',{min:0,max:1e7}),
       legacyCommuteHours:legacy?0:number(input.legacyCommuteHours,'旧版通勤时间',{min:0,max:48}),
-      restValuePerHour:number(input.restValuePerHour,'休息时间价值',{min:0,max:1e7}),
+      restValuePerHour,restValueProvided,timeValueReference:round(restValueProvided?restValuePerHour:overtimeHourlyRate,4),timeValueSource:restValueProvided?'manual':'overtime-rate-proxy',
+      willingnessScenario,willingnessRecords:normalizeWillingnessRecords(input.willingnessRecords),
       fatigueCoefficient:number(input.fatigueCoefficient,'疲劳成本系数',{min:0,max:1e7}),
     };
   }
@@ -160,12 +211,15 @@
     const actualNetHourly=actualOccupiedHours>EPSILON?cashNetValue/actualOccupiedHours:null;
     const minimumAcceptableReturn=input.minimumAcceptableHourly*actualOccupiedHours;
     const acceptanceGap=cashNetValue-minimumAcceptableReturn;
-    const restOpportunityCost=input.restValuePerHour*actualOccupiedHours;
-    const fatigueCost = input.fatigueCoefficient * h * h / 2;
-    const comprehensiveValue = cashNetValue - restOpportunityCost - fatigueCost;
+    const willingnessState=input.modelVersion>=4?willingnessAt(input,h):{value:null,source:'legacy'},factor=input.modelVersion>=4?willingnessFactor(willingnessState.value):null;
+    const preferenceCost=input.modelVersion>=4?subjectiveTimeCost(input,h):null;
+    const restOpportunityCost=input.modelVersion>=4?(preferenceCost.cost??null):input.restValuePerHour*actualOccupiedHours;
+    const fatigueCost=input.modelVersion>=4?0:input.fatigueCoefficient*h*h/2;
+    const personalPreferenceValue=input.modelVersion>=4?(preferenceCost.cost==null?null:cashNetValue-preferenceCost.cost):cashNetValue-restOpportunityCost-fatigueCost;
+    const comprehensiveValue=personalPreferenceValue;
     const subsidyHourly=input.modelVersion>=2&&input.nightSubsidyMode==='hourly'?input.nightSubsidyAmount:0;
-    const marginalNetValue=input.overtimeHourlyRate+subsidyHourly-(input.modelVersion===1?input.variableCostPerHour:input.variableExtraCostPerHour+input.legacyVariableCostPerHour)-input.restValuePerHour-input.fatigueCoefficient*h;
-    return {hours:round(h,4),settledHours:round(settledHours,4),overtimeIncome:round(overtimeIncome),overtimeWage:round(overtimeIncome),nightSubsidy:round(nightSubsidy),settlementBonus:round(settlementBonus),totalOvertimeIncome:round(totalOvertimeIncome),actualIncrementalIncome:round(totalOvertimeIncome),normalPayBaseline:round(normalPayBaseline),overtimePremium:round(overtimePremium),premiumPerHour:h>EPSILON?round(overtimePremium/h):0,totalMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate,4):null,premiumMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate-1,4):null,taxiCost:round(active?input.taxiCost:0),mealCost:round(active?input.mealCost:0),customExpenseNet:round(active?customExpenseNet:0),fixedCost:round(fixedCost),variableCost:round(variableCost),extraCosts:round(fixedCost+variableCost),cashNetValue:round(cashNetValue),actualOccupiedHours:round(actualOccupiedHours,4),actualNetHourly:actualNetHourly==null?null:round(actualNetHourly),minimumAcceptableReturn:round(minimumAcceptableReturn),acceptanceGap:round(acceptanceGap),restOpportunityCost:round(restOpportunityCost),fatigueCost:round(fatigueCost),comprehensiveValue:round(comprehensiveValue),marginalNetValue:round(marginalNetValue)};
+    const marginalNetValue=input.overtimeHourlyRate+subsidyHourly-(input.modelVersion===1?input.variableCostPerHour:input.variableExtraCostPerHour+input.legacyVariableCostPerHour)-(input.modelVersion>=4?(factor==null?0:input.timeValueReference*factor):input.restValuePerHour+input.fatigueCoefficient*h);
+    return {hours:round(h,4),settledHours:round(settledHours,4),overtimeIncome:round(overtimeIncome),overtimeWage:round(overtimeIncome),nightSubsidy:round(nightSubsidy),settlementBonus:round(settlementBonus),totalOvertimeIncome:round(totalOvertimeIncome),actualIncrementalIncome:round(totalOvertimeIncome),normalPayBaseline:round(normalPayBaseline),overtimePremium:round(overtimePremium),premiumPerHour:h>EPSILON?round(overtimePremium/h):0,totalMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate,4):null,premiumMultiplier:input.normalHourlyRate>EPSILON?round(input.overtimeHourlyRate/input.normalHourlyRate-1,4):null,taxiCost:round(active?input.taxiCost:0),mealCost:round(active?input.mealCost:0),customExpenseNet:round(active?customExpenseNet:0),fixedCost:round(fixedCost),variableCost:round(variableCost),extraCosts:round(fixedCost+variableCost),cashNetValue:round(cashNetValue),actualOccupiedHours:round(actualOccupiedHours,4),actualNetHourly:actualNetHourly==null?null:round(actualNetHourly),minimumAcceptableReturn:round(minimumAcceptableReturn),acceptanceGap:round(acceptanceGap),willingness:willingnessState.value,willingnessSource:willingnessState.source,willingnessFactor:factor,willingnessAttitude:willingnessAttitude(willingnessState.value),timeValueReference:input.timeValueReference,timeValueSource:input.timeValueSource,effectiveSubjectiveHourly:factor==null?null:round(input.timeValueReference*factor),subjectiveTimeCost:preferenceCost?.cost??null,willingnessRefusal:Boolean(preferenceCost?.refusal),preferenceUnknown:Boolean(preferenceCost?.unknown),restOpportunityCost:restOpportunityCost==null?null:round(restOpportunityCost),fatigueCost:round(fatigueCost),personalPreferenceValue:personalPreferenceValue==null?null:round(personalPreferenceValue),comprehensiveValue:comprehensiveValue==null?null:round(comprehensiveValue),marginalNetValue:round(marginalNetValue)};
   }
 
   function overtimeSettlementPoints(input) {
@@ -188,21 +242,22 @@
     const points=[];
     for(let index=0; index<=count; index+=1) points.push(overtimePoint(input,Math.min(input.maxHours,index*safeStep)));
     if(points.at(-1).hours!==input.maxHours) points.push(overtimePoint(input,input.maxHours));
-    const optimal=points.reduce((best,point)=>point.comprehensiveValue>best.comprehensiveValue?point:best,points[0]);
+    const optimal=points.reduce((best,point)=>point.comprehensiveValue!=null&&(best.comprehensiveValue==null||point.comprehensiveValue>best.comprehensiveValue)?point:best,points[0]);
     const cashBreakEven=firstPoint(points,(point)=>point.cashNetValue>=0);
-    const comprehensiveBreakEven=firstPoint(points,(point)=>point.comprehensiveValue>=0);
+    const comprehensiveBreakEven=firstPoint(points,(point)=>point.comprehensiveValue!=null&&point.comprehensiveValue>=0);
     let hasBeenPositive=false;
-    const negativeAfterPositive=firstPoint(points,(point)=>{if(point.comprehensiveValue>=0)hasBeenPositive=true;return hasBeenPositive&&point.comprehensiveValue<0;});
+    const negativeAfterPositive=firstPoint(points,(point)=>{if(point.comprehensiveValue!=null&&point.comprehensiveValue>=0)hasBeenPositive=true;return hasBeenPositive&&point.comprehensiveValue!=null&&point.comprehensiveValue<0;});
     const selected=overtimePoint(input,Math.min(input.selectedHours,input.maxHours));
-    const rates=points.slice(1).map((point,index)=>{const previous=points[index];const width=point.hours-previous.hours;return {fromHours:previous.hours,toHours:point.hours,hours:point.hours,cashRate:round((point.cashNetValue-previous.cashNetValue)/width),comprehensiveRate:round((point.comprehensiveValue-previous.comprehensiveValue)/width)};});
-    const zeroCrossings=[];for(let index=1;index<points.length;index+=1){const previous=points[index-1],point=points[index];if((previous.comprehensiveValue<=0&&point.comprehensiveValue>0)||(previous.comprehensiveValue>=0&&point.comprehensiveValue<0))zeroCrossings.push({fromHours:previous.hours,toHours:point.hours,fromValue:previous.comprehensiveValue,toValue:point.comprehensiveValue});}
-    const rateTurnsNegative=firstPoint(rates,(point,previous)=>previous.comprehensiveRate>0&&point.comprehensiveRate<=0);
+    const rates=points.slice(1).map((point,index)=>{const previous=points[index],width=point.hours-previous.hours,preferenceRate=point.personalPreferenceValue==null||previous.personalPreferenceValue==null?null:round((point.personalPreferenceValue-previous.personalPreferenceValue)/width);return {fromHours:previous.hours,toHours:point.hours,hours:point.hours,cashRate:round((point.cashNetValue-previous.cashNetValue)/width),preferenceRate,comprehensiveRate:preferenceRate??(point.comprehensiveValue==null||previous.comprehensiveValue==null?null:round((point.comprehensiveValue-previous.comprehensiveValue)/width))};});
+    const zeroCrossings=[];for(let index=1;index<points.length;index+=1){const previous=points[index-1],point=points[index];if(previous.comprehensiveValue!=null&&point.comprehensiveValue!=null&&((previous.comprehensiveValue<=0&&point.comprehensiveValue>0)||(previous.comprehensiveValue>=0&&point.comprehensiveValue<0)))zeroCrossings.push({fromHours:previous.hours,toHours:point.hours,fromValue:previous.comprehensiveValue,toValue:point.comprehensiveValue});}
+    const rateTurnsNegative=firstPoint(rates,(point,previous)=>previous.comprehensiveRate!=null&&point.comprehensiveRate!=null&&previous.comprehensiveRate>0&&point.comprehensiveRate<=0);
     const customExpenseNet=input.customExpenses.reduce((sum,item)=>sum+item.amount,0);
     const oneTimeCost=input.modelVersion>=2?input.taxiCost+input.mealCost+input.fixedExtraCost+customExpenseNet+input.legacyFixedCost:input.fixedCost;
     const fixedSubsidy=input.modelVersion>=2&&input.nightSubsidyMode==='fixed'?input.nightSubsidyAmount:0;
-    const activation={totalOvertimeIncome:round(fixedSubsidy),overtimePremium:round(fixedSubsidy),cashNetValue:round(fixedSubsidy-oneTimeCost),comprehensiveValue:round(fixedSubsidy-oneTimeCost-input.restValuePerHour*(input.modelVersion>=2?input.legacyCommuteHours:input.commuteHours))};
+    const activationPreference=input.modelVersion>=4?overtimePoint(input,.0001).personalPreferenceValue:fixedSubsidy-oneTimeCost-input.restValuePerHour*(input.modelVersion>=2?input.legacyCommuteHours:input.commuteHours);
+    const activation={totalOvertimeIncome:round(fixedSubsidy),overtimePremium:round(fixedSubsidy),cashNetValue:round(fixedSubsidy-oneTimeCost),personalPreferenceValue:activationPreference==null?null:round(activationPreference),comprehensiveValue:activationPreference==null?null:round(activationPreference)};
     const jumps=Math.abs(activation.totalOvertimeIncome)>EPSILON||Math.abs(oneTimeCost)>EPSILON?[{fromHours:0,toHours:points[1]?.hours||safeStep,amount:round(activation.cashNetValue),label:'一次性支出 / 固定补贴'}]:[];
-    const allPositiveHoursNegative=points.slice(1).every((point)=>point.comprehensiveValue<0);
+    const knownPreferencePoints=points.slice(1).filter((point)=>point.comprehensiveValue!=null),allPositiveHoursNegative=knownPreferencePoints.length>0&&knownPreferencePoints.every((point)=>point.comprehensiveValue<0);
     const acceptable=points.slice(1).filter((point)=>point.acceptanceGap>=-EPSILON);const acceptableRanges=[];for(const point of acceptable){const previous=acceptableRanges.at(-1);if(previous&&Math.abs(point.hours-previous.toHours-safeStep)<EPSILON)previous.toHours=point.hours;else acceptableRanges.push({fromHours:point.hours,toHours:point.hours});}
     const acceptancePoint=acceptable[0]||null;
     const settlementPoints=overtimeSettlementPoints(input);const nextSettlement=settlementPoints.find((item)=>item.hours>selected.hours+EPSILON)||null;
@@ -288,8 +343,11 @@
   }
 
   const OVERTIME_DECISION_RULES=Object.freeze({
-    lowWillingnessMax:25,
-    highWillingnessMin:75,
+    reluctantWillingnessMax:49,
+    lowWillingnessMax:49,
+    neutralWillingness:50,
+    tentativeWillingnessMax:60,
+    highWillingnessMin:80,
     highFatigueMin:75,
     meaningfulChange:20,
     staleAfterHours:6
@@ -304,7 +362,7 @@
     const currentRecord=latest&&!stale?latest:null,previousRecord=currentRecord&&matching.length>1?matching.at(-2):null;
     const plannedHours=Number(analysis.selected?.hours||0),actualHours=currentRecord?Number(currentRecord.hours||0):plannedHours;
     const currentPoint=analysis.points.find((point)=>Math.abs(point.hours-actualHours)<1e-9)||analysis.points.reduce((best,point)=>Math.abs(point.hours-actualHours)<Math.abs(best.hours-actualHours)?point:best,analysis.points[0]);
-    const optimalHours=Number(analysis.nodes?.optimal?.hours||0),willingness=currentRecord?.willingness==null?null:Number(currentRecord.willingness),fatigue=currentRecord?.fatigue==null?null:Number(currentRecord.fatigue);
+    const optimalHours=Number(analysis.nodes?.optimal?.hours||0),willingness=currentRecord?.willingness==null?(currentPoint.willingness==null?null:Number(currentPoint.willingness)):Number(currentRecord.willingness),fatigue=currentRecord?.fatigue==null?null:Number(currentRecord.fatigue);
     const willingnessDelta=willingness!=null&&previousRecord?.willingness!=null?willingness-Number(previousRecord.willingness):null;
     const nextSettlement=(analysis.settlementPoints||[]).find((point)=>point.hours>currentPoint.hours+1e-9)||null;
     const nextPoint=nextSettlement?(analysis.points.find((point)=>Math.abs(point.hours-nextSettlement.hours)<1e-9)||null):null;
@@ -315,11 +373,14 @@
       highFatigue:fatigue!=null&&fatigue>=Number(rules.highFatigueMin),
       willingnessChangedMeaningfully:willingnessDelta!=null&&Math.abs(willingnessDelta)>=Number(rules.meaningfulChange),
       economicPositive:Number(currentPoint.cashNetValue)>0,
-      comprehensivePositive:Number(currentPoint.comprehensiveValue)>=0,
+      preferenceKnown:currentPoint.personalPreferenceValue!=null||inputIsLegacy(analysis),
+      comprehensivePositive:currentPoint.comprehensiveValue!=null&&Number(currentPoint.comprehensiveValue)>=0,
       meetsPersonalThreshold:Number(currentPoint.acceptanceGap)>=0,
       positionToOptimal:currentPoint.hours>optimalHours+1e-9?'after':currentPoint.hours<optimalHours-1e-9?'before':'at'
     };
   }
 
-  window.TaskFlowLaborLife={round,overtimeHours,calculateSalary,calculateSalaryLegacy,calculateSalaryV2,normalizeOvertimeInput,overtimePoint,overtimeSettlementPoints,analyzeOvertime,calculateLiving,forecastSavings,salaryTargets,compareJobs,decisionSignals,OVERTIME_DECISION_RULES,overtimeDecisionContext};
+  function inputIsLegacy(analysis) { return Number(analysis?.formulaVersion||analysis?.input?.modelVersion||0)<4; }
+
+  window.TaskFlowLaborLife={round,overtimeHours,calculateSalary,calculateSalaryLegacy,calculateSalaryV2,WILLINGNESS_ANCHORS,willingnessFactor,willingnessAttitude,willingnessAt,normalizeOvertimeInput,overtimePoint,overtimeSettlementPoints,analyzeOvertime,calculateLiving,forecastSavings,salaryTargets,compareJobs,decisionSignals,OVERTIME_DECISION_RULES,overtimeDecisionContext};
 })();

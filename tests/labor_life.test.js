@@ -151,6 +151,53 @@ const noStatus=api.overtimeDecisionContext({analysis:decisionAnalysis,decisionDa
 assert.strictEqual(noStatus.currentRecord,null);
 assert.strictEqual(noStatus.actualHours,3,'without a status record the economic plan remains the fallback');
 
+// Willingness model V1: the published anchors and monotonic curve are part of the data contract.
+const willingnessAnchors=[[0,null],[10,6.699976],[20,3.623801],[30,2.150383],[40,1.399999],[50,1],[60,.33],[70,.225],[80,.12],[90,.06],[100,0]];
+willingnessAnchors.forEach(([score,expected])=>expected==null?assert.strictEqual(api.willingnessFactor(score),null):assert(Math.abs(api.willingnessFactor(score)-expected)<1e-6,`W=${score} anchor`));
+const willingnessFactors=Array.from({length:100},(_,index)=>api.willingnessFactor(index+1));
+assert(willingnessFactors.every((factor,index)=>index===0||factor<=willingnessFactors[index-1]+1e-9),'willingness cost factor decreases monotonically');
+assert.strictEqual(api.willingnessFactor(50),1,'the low and high branches meet at W=50');
+assert.strictEqual(api.willingnessAttitude(60),'轻度愿意，仍有摇摆','W=60 is not described as strongly willing');
+
+const preferenceBase={overtimeVersion:4,baseHourlyRate:20,overtimeRateMode:'hourly',overtimeHourlyRate:23,durationValue:2,maxHours:4,willingnessScenario:50};
+const proxyValue=api.analyzeOvertime(preferenceBase);
+assert.strictEqual(proxyValue.input.timeValueSource,'overtime-rate-proxy');
+assert.strictEqual(proxyValue.input.timeValueReference,23,'blank free-time value uses overtime hourly pay as a visible proxy');
+assert.strictEqual(proxyValue.selected.subjectiveTimeCost,46);
+assert.strictEqual(proxyValue.selected.personalPreferenceValue,0);
+const explicitZero=api.analyzeOvertime({...preferenceBase,restValuePerHour:0,restValueProvided:true,restValueMode:'manual'});
+assert.strictEqual(explicitZero.input.timeValueSource,'manual');
+assert.strictEqual(explicitZero.input.timeValueReference,0,'an explicit zero is not replaced by the proxy');
+assert.strictEqual(explicitZero.selected.personalPreferenceValue,46);
+const manualValue=api.analyzeOvertime({...preferenceBase,restValuePerHour:10,restValueProvided:true,restValueMode:'manual'});
+assert.strictEqual(manualValue.input.timeValueReference,10);
+assert.strictEqual(manualValue.selected.subjectiveTimeCost,20);
+const willingHundred=api.analyzeOvertime({...preferenceBase,willingnessScenario:100});
+assert.strictEqual(willingHundred.selected.subjectiveTimeCost,0);
+assert.strictEqual(willingHundred.selected.personalPreferenceValue,46);
+const unwillingZero=api.analyzeOvertime({...preferenceBase,willingnessScenario:0});
+assert.strictEqual(unwillingZero.selected.willingnessRefusal,true);
+assert.strictEqual(unwillingZero.selected.personalPreferenceValue,null,'W=0 is refusal, not a zero-cost state');
+const unknownPreference=api.analyzeOvertime({...preferenceBase,willingnessScenario:''});
+assert.strictEqual(unknownPreference.selected.preferenceUnknown,true);
+assert.strictEqual(unknownPreference.selected.personalPreferenceValue,null,'missing willingness stays unknown');
+assert.strictEqual(unknownPreference.points[0].personalPreferenceValue,null,'zero hours does not fabricate a preference value when willingness is unknown');
+const lowWillHighPay=api.analyzeOvertime({...preferenceBase,overtimeHourlyRate:1000,willingnessScenario:40});
+assert.strictEqual(lowWillHighPay.selected.willingnessAttitude,'更倾向下班');
+assert(lowWillHighPay.selected.personalPreferenceValue<0,'high pay cannot turn low willingness into a willing label');
+assert(api.analyzeOvertime({...preferenceBase,overtimeHourlyRate:10000,willingnessScenario:40}).selected.personalPreferenceValue<0,'even an extreme proxy wage does not override W=40');
+
+const interpolatedPreference=api.analyzeOvertime({...preferenceBase,willingnessScenario:50,willingnessRecords:[{hours:1,willingness:40,observedAt:'2026-11-06T18:00:00Z'},{hours:2,willingness:80,observedAt:'2026-11-06T19:00:00Z'}]});
+assert.strictEqual(api.overtimePoint(interpolatedPreference.input,1.5).willingness,60,'records interpolate on the shared overtime timeline');
+assert.strictEqual(api.overtimePoint(interpolatedPreference.input,.5).willingnessSource,'scenario-before-first-record');
+assert.strictEqual(api.overtimePoint(interpolatedPreference.input,3).willingnessSource,'assumption-latest-record','after the latest record, keeping the latest value is explicitly marked as an assumption');
+const noPrehistory=api.analyzeOvertime({...preferenceBase,willingnessScenario:'',willingnessRecords:[{hours:1,willingness:40}]});
+assert.strictEqual(api.overtimePoint(noPrehistory.input,.5).willingness,null,'before the first record no willingness is invented');
+assert.strictEqual(api.overtimePoint(noPrehistory.input,1).personalPreferenceValue,null,'cumulative preference remains unavailable when its earlier interval is unknown');
+const v4Threshold=api.analyzeOvertime({...preferenceBase,willingnessScenario:60,durationValue:3.5,bonusMode:'threshold',bonusThresholdHours:4,bonusThresholdAmount:160,maxHours:6});
+assert.strictEqual(v4Threshold.selected.settlementBonus,0,'the willingness model preserves discrete settlement rules');
+assert.strictEqual(api.overtimePoint(v4Threshold.input,4).settlementBonus,160);
+
 const living=api.calculateLiving({actualIncome:10000,rent:2500,food:1500,transport:300,utilities:400,dailyNeeds:500,otherNecessary:300,nonEssential:800,oneTime:200,workRelated:500,availableSavings:30000});
 assert.strictEqual(living.necessaryLiving,5500);
 assert.strictEqual(living.totalSpending,7000);
